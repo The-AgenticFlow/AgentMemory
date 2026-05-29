@@ -1,0 +1,12 @@
+[package]
+name = "engram-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+engram-core = { path = "../engram-core" }
+engram-qwen = { path = "../engram-qwen" }
+engram-store = { path = "../engram-store" }
+tokio.workspace = true

@@ -4,6 +4,7 @@ members = [
   "crates/engram-core",
   "crates/engram-store",
   "crates/engram-qwen",
+  "crates/engram-runtime",
   "crates/engram-server",
   "crates/engram-cli",
 ]

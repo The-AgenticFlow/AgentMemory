@@ -265,6 +265,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "engram-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "engram-core",
+ "engram-qwen",
+ "engram-store",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "engram-server"
 version = "0.1.0"
 dependencies = [

@@ -9,6 +9,17 @@ pub struct EmbeddingRequest {
     pub input: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingData {
+    pub index: usize,
+    pub embedding: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingResponse {
+    pub data: Vec<EmbeddingData>,
+}
+
 pub async fn build_embedding_request(
     client: &DashScopeClient,
     request: &EmbeddingRequest,

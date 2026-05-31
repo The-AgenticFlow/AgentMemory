@@ -13,8 +13,8 @@ mod pattern;
 mod session;
 mod working_context;
 
-pub use engram::{EngramEntry, MetaEngram};
+pub use engram::{EngramEntry, EngramSource, EngramStatus, MetaEngram, ThalamusScores};
 pub use episode::Episode;
-pub use pattern::PatternEntry;
+pub use pattern::{PatternEntry, PatternSource};
 pub use session::{Session, SessionMode};
 pub use working_context::{ContextTier, GoalItem, WorkingContext};

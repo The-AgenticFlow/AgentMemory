@@ -1,3 +1,8 @@
+//! Nightly consolidation run for decay, archiving, and schema compression.
+//!
+//! This node simulates the offline consolidation pass that updates engram
+//! strength over time and compresses clusters of engrams into meta-engrams.
+
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
@@ -6,10 +11,14 @@ use crate::embeddings::{cosine_similarity, embed_text};
 use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
 
+/// Consolidation parameters and cross-cutting replay controls.
 #[derive(Debug, Clone, Copy)]
 pub struct NightlyConsolidationNode {
+    /// Strength above which an engram remains active.
     pub active_threshold: f32,
+    /// Strength below which an engram becomes archived.
     pub archive_threshold: f32,
+    /// Similarity threshold used to form schema clusters.
     pub schema_threshold: f32,
     /// Base decay rate applied per day of inactivity.
     pub base_decay_rate: f32,
@@ -37,6 +46,7 @@ impl Default for NightlyConsolidationNode {
 }
 
 impl NightlyConsolidationNode {
+    /// Runs decay followed by schema compression.
     pub async fn run(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -46,6 +56,7 @@ impl NightlyConsolidationNode {
         self.compress_schemas(qdrant, postgres).await
     }
 
+    /// Applies time-based decay and status updates to all active engrams.
     async fn decay_engrams(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -102,6 +113,7 @@ impl NightlyConsolidationNode {
         (self.base_decay_rate - valence_reduction - surprise_reduction).max(0.01)
     }
 
+    /// Compresses similar engrams into schema-level meta-engrams.
     async fn compress_schemas(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -157,6 +169,7 @@ impl NightlyConsolidationNode {
     }
 }
 
+/// Infers a coarse session mode from the engram's salience profile.
 fn engram_mode(engram: &EngramEntry) -> engram_core::SessionMode {
     if engram.thalamus_scores.surprise >= 0.7 {
         engram_core::SessionMode::Exploration
@@ -167,10 +180,12 @@ fn engram_mode(engram: &EngramEntry) -> engram_core::SessionMode {
     }
 }
 
+/// Returns true when two engrams share at least one tag.
 fn shared_tag(left: &engram_core::EngramEntry, right: &engram_core::EngramEntry) -> bool {
     left.tags.iter().any(|tag| right.tags.contains(tag))
 }
 
+/// Computes the tag intersection across a cluster of engrams.
 fn cluster_tag_intersection(cluster: &[engram_core::EngramEntry]) -> Vec<String> {
     let mut intersection: Option<std::collections::BTreeSet<String>> = None;
     for engram in cluster {
@@ -191,6 +206,7 @@ fn cluster_tag_intersection(cluster: &[engram_core::EngramEntry]) -> Vec<String>
         .collect::<Vec<_>>()
 }
 
+/// Averages embeddings across a cluster.
 fn average_embedding(cluster: &[engram_core::EngramEntry]) -> Vec<f32> {
     let dimension = cluster
         .first()
@@ -213,6 +229,7 @@ fn average_embedding(cluster: &[engram_core::EngramEntry]) -> Vec<f32> {
 }
 
 #[allow(dead_code)]
+/// Local helper kept for future schema embedding experiments.
 fn _schema_embedding_for(text: &str) -> Vec<f32> {
     embed_text(text)
 }

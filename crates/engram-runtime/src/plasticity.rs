@@ -1,11 +1,21 @@
+//! Cross-cutting learning-rate modulation for the memory runtime.
+//!
+//! Plasticity controls how strongly a new event should affect strength,
+//! decay, and reconsolidation behavior.
+
 use chrono::{DateTime, Utc};
 use engram_core::{SessionMode, ThalamusScores};
 
+/// Derived signal used to modulate learning and decay.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlasticitySignal {
+    /// Multiplier applied to strength updates.
     pub strength_multiplier: f32,
+    /// Multiplier applied to decay.
     pub decay_multiplier: f32,
+    /// Whether the reconsolidation window is still open.
     pub reconsolidation_open: bool,
+    /// Whether the episode should be treated as especially plastic.
     pub high_plasticity: bool,
 }
 
@@ -32,6 +42,7 @@ impl Default for PlasticityProfile {
 }
 
 impl PlasticityProfile {
+    /// Converts thalamus scores and session context into a plasticity signal.
     pub fn signal(
         &self,
         scores: &ThalamusScores,
@@ -71,10 +82,12 @@ impl PlasticityProfile {
         }
     }
 
+    /// Applies the signal to a base strength delta.
     pub fn strength_delta(&self, base_delta: f32, signal: PlasticitySignal) -> f32 {
         (base_delta * signal.strength_multiplier).clamp(0.05, self.max_strength_delta)
     }
 
+    /// Applies the signal to a base decay rate.
     pub fn decay_rate(&self, base_decay_rate: f32, signal: PlasticitySignal) -> f32 {
         (base_decay_rate * signal.decay_multiplier).max(0.01)
     }

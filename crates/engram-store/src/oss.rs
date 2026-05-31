@@ -1,28 +1,49 @@
-/// Object storage adapter for full episode payloads.
-///
-/// Needs:
-/// - Store large episode bodies outside the hot relational/vector path.
-/// - Keep a durable pointer for retrieval and audit.
-/// - Separate large content from metadata-heavy memory indices.
-///
-/// Use cases:
-/// - Upload raw episode content.
-/// - Keep full text or tool traces available for reconstruction.
-/// - Attach durable content references to engram records.
-///
-/// System interactions:
-/// - Complements `EngramEntry.episodic_content_ref`.
-/// - Receives writes from episode capture and consolidation.
-/// - Serves the full-content path when retrieval loads more than metadata.
-use anyhow::Result;
+//! Local object storage adapter for episode payloads.
+//!
+//! The adapter writes raw episode blobs to disk so the runtime can preserve
+//! the full source material behind engrams without needing a cloud object
+//! store during local development.
 
-/// Minimal OSS store placeholder.
-#[derive(Debug, Default, Clone)]
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+
+/// Local file-backed OSS adapter.
+#[derive(Debug, Clone, Default)]
 pub struct OssMemoryStore;
 
 impl OssMemoryStore {
     /// Stores one episode blob under a durable object key.
-    pub async fn put_episode_blob(&self, _key: &str, _bytes: &[u8]) -> Result<()> {
+    pub async fn put_episode_blob(&self, key: &str, bytes: &[u8]) -> Result<()> {
+        let path = data_dir().join("oss").join(sanitize_key(key));
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        tokio::fs::write(&path, bytes)
+            .await
+            .with_context(|| format!("writing {}", path.display()))?;
         Ok(())
     }
+}
+
+fn data_dir() -> PathBuf {
+    std::env::var_os("ENGRAM_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".agent-memory")
+        })
+        .join("store")
+}
+
+fn sanitize_key(key: &str) -> String {
+    key.chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect()
 }

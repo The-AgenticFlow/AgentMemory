@@ -1,3 +1,8 @@
+//! Retrieval architecture for reconstructing knowledge from memory.
+//!
+//! This node activates schemas, searches engrams, spreads activation
+//! through kinship links, and assembles a transparent knowledge payload.
+
 use anyhow::Result;
 use engram_core::{MetaEngram, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
@@ -7,8 +12,10 @@ use crate::embeddings::{cosine_similarity, embed_text};
 use crate::nodes::schema::SchemaActivationNode;
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
 
+/// Top-level retrieval node that performs schema-guided search.
 #[derive(Debug, Clone, Copy)]
 pub struct RetrievalArchitectureNode {
+    /// Base number of candidates to return.
     pub top_k: usize,
 }
 
@@ -110,6 +117,7 @@ impl RetrievalArchitectureNode {
     }
 }
 
+/// Adjusts retrieval behavior based on the active mode.
 fn spread_factor(mode: engram_core::RetrievalState) -> f32 {
     match mode {
         engram_core::RetrievalState::PrecisionMode => 0.45,
@@ -120,6 +128,7 @@ fn spread_factor(mode: engram_core::RetrievalState) -> f32 {
     }
 }
 
+/// Applies query, schema, and mode bonuses to raw similarity.
 fn adjust_similarity(
     similarity: f32,
     query: &str,
@@ -152,6 +161,7 @@ fn adjust_similarity(
     (similarity + tag_overlap * 0.03 + schema_bonus * 0.04 + mode_bonus).clamp(0.0, 1.0)
 }
 
+/// Summarizes the activated schema for display and logging.
 fn schema_prediction_summary(schema: &MetaEngram) -> String {
     if schema.prediction_fields.is_empty() {
         "schema with no explicit predictions".to_string()
@@ -160,6 +170,7 @@ fn schema_prediction_summary(schema: &MetaEngram) -> String {
     }
 }
 
+/// Builds the final transparent knowledge payload.
 fn constructive_assembly(
     query: &str,
     session: &Session,

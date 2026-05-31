@@ -171,3 +171,5 @@ The normal flow is:
 8. The working context closes and the session can be updated or ended.
 
 This creates the full loop from experience to memory to schema to future reasoning.
+
+If you want the full episode-to-schema walk-through with a diagram, see [episode-to-schema.md](./episode-to-schema.md).

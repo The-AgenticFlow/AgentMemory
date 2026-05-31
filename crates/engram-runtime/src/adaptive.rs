@@ -1,10 +1,18 @@
+//! Adaptive feedback state for retrieval and completion thresholds.
+//!
+//! This module keeps the runtime slightly self-tuning by nudging search
+//! breadth and completion thresholds based on recent retrieval quality.
+
 use engram_core::{RetrievalState, SessionMode};
 
 use crate::types::RetrievalOutcome;
 
+/// Small mutable state used to bias retrieval and completion decisions.
 #[derive(Debug, Clone)]
 pub struct AdaptiveThresholdState {
+    /// Bias applied to the pattern completion threshold.
     pub completion_bias: f32,
+    /// Bias applied to retrieval breadth.
     pub retrieval_bias: f32,
 }
 
@@ -18,6 +26,7 @@ impl Default for AdaptiveThresholdState {
 }
 
 impl AdaptiveThresholdState {
+    /// Produces an adjusted completion threshold for the current session.
     pub fn completion_threshold(
         &self,
         base_threshold: f32,
@@ -36,6 +45,7 @@ impl AdaptiveThresholdState {
             .clamp(0.30, 0.95)
     }
 
+    /// Chooses a search budget for ANN retrieval.
     pub fn search_budget(&self, base_top_k: usize, session_mode: SessionMode) -> usize {
         let multiplier = match session_mode {
             SessionMode::Exploration => 2,
@@ -55,6 +65,7 @@ impl AdaptiveThresholdState {
             .max(1)
     }
 
+    /// Selects the retrieval mode from the query and active session.
     pub fn retrieval_mode(
         &self,
         session_mode: SessionMode,
@@ -93,6 +104,7 @@ impl AdaptiveThresholdState {
         }
     }
 
+    /// Updates the adaptive biases from the latest retrieval outcome.
     pub fn update_from_retrieval(&mut self, outcome: &RetrievalOutcome) {
         let fact_count = outcome.knowledge.facts.len() as f32;
         let gap_count = outcome.knowledge.gaps.len() as f32;

@@ -1,10 +1,16 @@
+//! Pattern separation and completion logic.
+//!
+//! This node decides whether a buffered pattern should update an existing
+//! engram or crystallize into a new one.
+
 use anyhow::Result;
-use engram_core::{EngramEntry, EngramSource, PatternEntry, PatternSource, Session};
+use engram_core::{EngramEntry, EngramSource, PatternEntry, PatternSource, PatternState, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
 use crate::embeddings::cosine_similarity;
 use crate::types::RetrievalCandidate;
 
+/// Similarity threshold used to decide completion.
 #[derive(Debug, Clone, Copy)]
 pub struct PatternSepCompNode {
     pub completion_threshold: f32,
@@ -18,14 +24,19 @@ impl Default for PatternSepCompNode {
     }
 }
 
+/// Result of a separation/completion decision.
 #[derive(Debug, Clone)]
 pub struct PatternDecision {
-    pub state: engram_core::PatternState,
+    /// The state transition selected by the node.
+    pub state: PatternState,
+    /// The engram that was created or updated.
     pub engram: EngramEntry,
+    /// Similarity to the nearest candidate.
     pub similarity: f32,
 }
 
 impl PatternSepCompNode {
+    /// Resolves a buffered pattern into either a new engram or an update.
     pub async fn separate_or_complete(
         &self,
         pattern: &PatternEntry,
@@ -50,7 +61,7 @@ impl PatternSepCompNode {
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {
-                    state: engram_core::PatternState::Completion,
+                    state: PatternState::Completion,
                     engram,
                     similarity: candidate.similarity,
                 }
@@ -72,7 +83,7 @@ impl PatternSepCompNode {
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {
-                    state: engram_core::PatternState::Separation,
+                    state: PatternState::Separation,
                     engram,
                     similarity: candidate.similarity,
                 }
@@ -93,7 +104,7 @@ impl PatternSepCompNode {
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {
-                    state: engram_core::PatternState::Separation,
+                    state: PatternState::Separation,
                     engram,
                     similarity: 0.0,
                 }
@@ -103,6 +114,7 @@ impl PatternSepCompNode {
         Ok(decision)
     }
 
+    /// Produces a readable summary for retrieval debugging.
     pub fn candidate_summary(&self, candidate: &RetrievalCandidate) -> String {
         format!(
             "engram:{} similarity:{:.3} tags:{}",
@@ -112,6 +124,7 @@ impl PatternSepCompNode {
         )
     }
 
+    /// Delegates to the runtime similarity helper.
     pub fn similarity(&self, left: &[f32], right: &[f32]) -> f32 {
         cosine_similarity(left, right)
     }

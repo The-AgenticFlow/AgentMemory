@@ -1,8 +1,16 @@
+//! Lightweight embedding utilities used by the runtime pipeline.
+//!
+//! These helpers provide a deterministic local embedding fallback so the
+//! memory graph can run without a remote embedding service during tests
+//! and early development.
+
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+/// Default vector size used by the local embedding fallback.
 pub const DEFAULT_EMBEDDING_DIM: usize = 16;
 
+/// Builds a small deterministic embedding from token hashes.
 pub fn embed_text(text: &str) -> Vec<f32> {
     let normalized = text.trim().to_lowercase();
     let mut values = vec![0.0; DEFAULT_EMBEDDING_DIM];
@@ -25,6 +33,7 @@ pub fn embed_text(text: &str) -> Vec<f32> {
     values
 }
 
+/// Computes cosine similarity between two vectors.
 pub fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     let length = left.len().min(right.len());
     if length == 0 {

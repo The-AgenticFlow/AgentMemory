@@ -1,3 +1,11 @@
+//! Runtime layer for the Engram memory architecture.
+//!
+//! This crate ties together the selective intake, buffer accumulation,
+//! pattern separation/completion, consolidation, and retrieval mechanics
+//! that sit on top of the shared data model in `engram-core`.
+//! It also exposes the session and working-context orchestration used
+//! by the agent loop.
+
 pub mod adaptive;
 pub mod embeddings;
 pub mod engine;

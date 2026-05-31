@@ -1,3 +1,8 @@
+//! Main runtime coordinator for the Engram memory system.
+//!
+//! `MemorySystem` owns the storage adapters, runtime nodes, and adaptive
+//! state used to run ingestion, retrieval, and consolidation end to end.
+
 use anyhow::Result;
 use engram_core::{Episode, MetaEngram, Session, SessionMode, WorkingContext};
 use engram_qwen::DashScopeClient;
@@ -15,11 +20,16 @@ use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
 use crate::types::{IngestionOutcome, RetrievalOutcome, SessionHandle};
 
+/// Central coordinator for all runtime memory operations.
 #[derive(Clone)]
 pub struct MemorySystem {
+    /// Vector store for engrams and buffer patterns.
     pub qdrant: QdrantMemoryStore,
+    /// Relational metadata store.
     pub postgres: PostgresMemoryStore,
+    /// Object store for raw episode payloads.
     pub oss: OssMemoryStore,
+    /// Optional Qwen client for remote reasoning and embeddings.
     pub qwen: Option<DashScopeClient>,
     thalamus: ThalamusFilterNode,
     buffer: BufferIngestNode,
@@ -38,6 +48,7 @@ impl Default for MemorySystem {
 }
 
 impl MemorySystem {
+    /// Creates a runtime with default local adapters and node settings.
     pub fn new() -> Self {
         Self {
             qdrant: QdrantMemoryStore::default(),
@@ -55,11 +66,13 @@ impl MemorySystem {
         }
     }
 
+    /// Installs a Qwen client for remote API calls.
     pub fn with_qwen(mut self, qwen: DashScopeClient) -> Self {
         self.qwen = Some(qwen);
         self
     }
 
+    /// Opens and persists a new session handle.
     pub async fn open_session(
         &self,
         user_id: Option<uuid::Uuid>,
@@ -75,6 +88,7 @@ impl MemorySystem {
         })
     }
 
+    /// Updates the current session state and persists the change.
     pub async fn update_session(
         &self,
         handle: &mut SessionHandle,
@@ -87,11 +101,13 @@ impl MemorySystem {
         Ok(())
     }
 
+    /// Marks the session as closed.
     pub async fn close_session(&self, handle: &mut SessionHandle) -> Result<()> {
         handle.session.close();
         self.postgres.save_session(&handle.session).await
     }
 
+    /// Opens a task-local working context for the current session.
     pub async fn open_working_context(
         &self,
         handle: &mut SessionHandle,
@@ -103,6 +119,7 @@ impl MemorySystem {
         Ok(())
     }
 
+    /// Processes one completed episode through intake, buffer, and patterning.
     pub async fn process_episode(
         &self,
         handle: &mut SessionHandle,
@@ -182,10 +199,12 @@ impl MemorySystem {
         })
     }
 
+    /// Runs nightly consolidation over the current memory stores.
     pub async fn consolidate(&self) -> Result<Vec<MetaEngram>> {
         self.consolidation.run(&self.qdrant, &self.postgres).await
     }
 
+    /// Retrieves structured knowledge for a query.
     pub async fn retrieve(
         &self,
         handle: &SessionHandle,
@@ -229,6 +248,7 @@ impl MemorySystem {
 }
 
 impl MemorySystem {
+    /// Local deterministic embedding fallback used by the runtime.
     pub fn pseudo_embedding(&self, text: &str) -> Vec<f32> {
         embed_text(text)
     }

@@ -1,10 +1,19 @@
+//! Synaptic tagging and capture helpers for temporal association.
+//!
+//! The runtime uses this module to model when nearby events should spill
+//! learning influence into one another and when replay should be amplified.
+
 use chrono::{DateTime, Utc};
 use engram_core::{Session, SessionMode};
 
+/// Summary of the temporal association signal for one event pair.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SynapticTaggingSignal {
+    /// Association window in minutes for the active session mode.
     pub association_window_minutes: i64,
+    /// Spillover weight to apply across nearby episodes.
     pub spillover: f32,
+    /// Whether the two events occurred inside the window.
     pub within_window: bool,
 }
 
@@ -29,6 +38,7 @@ impl Default for SynapticTaggingCapture {
 }
 
 impl SynapticTaggingCapture {
+    /// Returns the association window for the current session mode.
     pub fn association_window_minutes(&self, session_mode: SessionMode) -> i64 {
         match session_mode {
             SessionMode::Exploration => self.exploration_window_minutes,
@@ -37,6 +47,7 @@ impl SynapticTaggingCapture {
         }
     }
 
+    /// Computes spillover as a bounded function of surprise and distance.
     pub fn spillover(&self, surprise: f32, delta_minutes: i64, session_mode: SessionMode) -> f32 {
         let window_minutes = self.association_window_minutes(session_mode).max(1) as f32;
         let distance = delta_minutes.unsigned_abs() as f32;
@@ -44,6 +55,7 @@ impl SynapticTaggingCapture {
         (surprise * attenuation).min(self.max_spillover)
     }
 
+    /// Builds a full association signal between two timestamps.
     pub fn signal(
         &self,
         session: &Session,
@@ -61,6 +73,7 @@ impl SynapticTaggingCapture {
         }
     }
 
+    /// Produces a replay multiplier based on access history and surprise.
     pub fn replay_multiplier(
         &self,
         access_count: u64,

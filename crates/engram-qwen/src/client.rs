@@ -40,6 +40,14 @@ impl DashScopeConfig {
     }
 }
 
+use serde::de::DeserializeOwned;
+
+use crate::chat::{build_chat_request, ChatRequest, ChatResponse};
+use crate::embeddings::{
+    build_embedding_request, EmbeddingRequest, EmbeddingResponse,
+};
+use crate::rerank::{build_rerank_request, RerankRequest, RerankResponse};
+
 /// Thin HTTP wrapper around DashScope endpoints.
 #[derive(Debug, Clone)]
 pub struct DashScopeClient {
@@ -80,5 +88,57 @@ impl DashScopeClient {
             .rerank_base_url
             .join(path.trim_start_matches('/'))
             .context("failed to build rerank URL")
+    }
+
+    /// Sends a chat completion request.
+    pub async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
+        let response = build_chat_request(self, request).await?.send().await?;
+        Ok(response.error_for_status()?.json::<ChatResponse>().await?)
+    }
+
+    /// Sends an embeddings request.
+    pub async fn embeddings(
+        &self,
+        request: &EmbeddingRequest,
+    ) -> Result<EmbeddingResponse> {
+        let response = build_embedding_request(self, request).await?.send().await?;
+        Ok(response.error_for_status()?.json::<EmbeddingResponse>().await?)
+    }
+
+    /// Sends a rerank request.
+    pub async fn rerank(&self, request: &RerankRequest) -> Result<RerankResponse> {
+        let response = build_rerank_request(self, request).await?.send().await?;
+        Ok(response.error_for_status()?.json::<RerankResponse>().await?)
+    }
+
+    /// Runs a structured JSON extraction through chat and parses the result.
+    pub async fn structured<T: DeserializeOwned>(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<T> {
+        let response = self.chat(request).await?;
+        let content = response
+            .choices
+            .first()
+            .map(|choice| choice.message.content.as_str())
+            .unwrap_or("{}");
+        Ok(serde_json::from_str(content)?)
+    }
+
+    /// Sends a think-style prompt through the chat endpoint and returns text.
+    pub async fn thinking(&self, prompt: impl Into<String>, model: impl Into<String>) -> Result<String> {
+        let request = ChatRequest::new(
+            model,
+            vec![crate::chat::ChatMessage {
+                role: "user".to_string(),
+                content: prompt.into(),
+            }],
+        );
+        let response = self.chat(&request).await?;
+        Ok(response
+            .choices
+            .first()
+            .map(|choice| choice.message.content.clone())
+            .unwrap_or_default())
     }
 }

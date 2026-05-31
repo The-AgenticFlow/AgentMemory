@@ -1,12 +1,19 @@
+//! Schema activation for retrieval.
+//!
+//! This node chooses the most relevant meta-engram to guide query
+//! interpretation and scope retrieval more precisely.
+
 use engram_core::MetaEngram;
 use engram_store::PostgresMemoryStore;
 
 use crate::embeddings::cosine_similarity;
 
+/// Activates the most similar stored schema for a query embedding.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SchemaActivationNode;
 
 impl SchemaActivationNode {
+    /// Loads schemas from Postgres and returns the best match, if any.
     pub async fn activate(
         &self,
         query_embedding: &[f32],

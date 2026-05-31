@@ -1,3 +1,8 @@
+//! Pre-engram buffer ingestion and accumulation.
+//!
+//! This node keeps weak patterns in a short-term ANN-backed buffer until
+//! they either repeat enough to crystallize or decay away.
+
 use anyhow::Result;
 use engram_core::{PatternEntry, PatternSource};
 
@@ -9,10 +14,14 @@ use engram_core::Episode;
 use engram_core::Session;
 use engram_store::QdrantMemoryStore;
 
+/// Buffer node that accumulates repeated weak patterns.
 #[derive(Debug, Clone, Copy)]
 pub struct BufferIngestNode {
+    /// Similarity required to merge with an existing buffered pattern.
     pub similarity_threshold: f32,
+    /// Initial threshold used for promoting a fresh pattern.
     pub promotion_threshold: f32,
+    /// Base decay rate for new buffered patterns.
     pub decay_rate: f32,
 }
 
@@ -27,6 +36,7 @@ impl Default for BufferIngestNode {
 }
 
 impl BufferIngestNode {
+    /// Inserts the episode into the buffer or updates the nearest pattern.
     pub async fn ingest(
         &self,
         episode: &Episode,
@@ -117,6 +127,7 @@ impl BufferIngestNode {
     }
 }
 
+/// Produces a stable hash for the action/context pair.
 fn pattern_hash(action: &str, context: &str) -> String {
     format!(
         "{}::{}",
@@ -125,6 +136,7 @@ fn pattern_hash(action: &str, context: &str) -> String {
     )
 }
 
+/// Extracts a compact tag set from the episode text.
 fn token_tags(left: &str, right: &str) -> Vec<String> {
     let mut tags: Vec<String> = left
         .split_whitespace()

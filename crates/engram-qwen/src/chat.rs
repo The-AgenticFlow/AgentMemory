@@ -27,6 +27,17 @@ impl ChatRequest {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChatChoice {
+    pub index: usize,
+    pub message: ChatMessage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChatResponse {
+    pub choices: Vec<ChatChoice>,
+}
+
 pub async fn build_chat_request(
     client: &DashScopeClient,
     request: &ChatRequest,

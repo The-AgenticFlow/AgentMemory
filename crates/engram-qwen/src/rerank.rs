@@ -10,6 +10,17 @@ pub struct RerankRequest {
     pub documents: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RerankResult {
+    pub index: usize,
+    pub relevance_score: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RerankResponse {
+    pub results: Vec<RerankResult>,
+}
+
 pub async fn build_rerank_request(
     client: &DashScopeClient,
     request: &RerankRequest,

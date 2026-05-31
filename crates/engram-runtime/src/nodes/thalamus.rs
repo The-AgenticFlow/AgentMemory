@@ -1,22 +1,39 @@
+//! Thalamus filter for selective memory intake.
+//!
+//! This node scores each episode before it is allowed into the buffer.
+//! It approximates relevance, surprise, novelty, and valence so the
+//! runtime only promotes experiences that are worth preserving.
+
 use engram_core::{EngramEntry, Episode, Session, SessionMode, ThalamusScores};
 
+/// Full assessment produced by the thalamus filter.
 #[derive(Debug, Clone, Copy)]
 pub struct ThalamusAssessment {
+    /// Whether the episode passes intake.
     pub accepted: bool,
+    /// Combined relevance score.
     pub score: f32,
+    /// Threshold used for the decision.
     pub threshold: f32,
+    /// The underlying dimension scores.
     pub scores: ThalamusScores,
 }
 
+/// Rule-based relevance scorer for the intake gate.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ThalamusFilterNode {
+    /// Weight for novelty.
     pub novelty_weight: f32,
+    /// Weight for surprise.
     pub surprise_weight: f32,
+    /// Weight for task relevance.
     pub task_relevance_weight: f32,
+    /// Weight for emotional valence.
     pub valence_weight: f32,
 }
 
 impl ThalamusFilterNode {
+    /// Scores one episode against the active session and recent memory.
     pub async fn score_episode(
         &self,
         episode: &Episode,

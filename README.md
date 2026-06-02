@@ -5,7 +5,7 @@ A neuroscience-inspired memory architecture for AI agents, built in Rust.
 
 ## Overview
 
-AgentMemory implements an **Engram-Based Memory System** — a biologically grounded architecture that enables AI agents to learn from experience, recognize patterns, abstract knowledge, and actively forget what is irrelevant. Instead of treating every interaction as new, the agent builds persistent memory structures that evolve over time.
+Artifical Engram implements an **Engram-Based Memory System** — a biologically grounded architecture that enables AI agents to learn from experience, recognize patterns, abstract knowledge, and actively forget what is irrelevant. Instead of treating every interaction as new, the agent builds persistent memory structures that evolve over time.
 
 ## Core Concepts
 

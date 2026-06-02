@@ -8,7 +8,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Default vector size used by the local embedding fallback.
-pub const DEFAULT_EMBEDDING_DIM: usize = 16;
+pub const DEFAULT_EMBEDDING_DIM: usize = 256;
 
 /// Builds a small deterministic embedding from token hashes.
 pub fn embed_text(text: &str) -> Vec<f32> {

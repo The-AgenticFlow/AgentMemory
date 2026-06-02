@@ -137,10 +137,29 @@ fn adjust_similarity(
     mode: engram_core::RetrievalState,
 ) -> f32 {
     let query_lower = query.to_lowercase();
+    let query_terms: Vec<&str> = query_lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() > 2)
+        .collect();
+    
+    // Keyword overlap: count how many query terms appear in tags or engram content
     let tag_overlap = tags
         .iter()
-        .filter(|tag| query_lower.contains(&tag.to_lowercase()))
+        .filter(|tag| {
+            let tag_lower = tag.to_lowercase();
+            query_terms.iter().any(|term| tag_lower.contains(term))
+        })
         .count() as f32;
+    
+    // Content-level keyword boost (if engram has readable content)
+    let content_overlap = tags
+        .iter()
+        .filter(|tag| {
+            let tag_lower = tag.to_lowercase();
+            query_terms.iter().any(|term| content_contains_word(&tag_lower, term))
+        })
+        .count() as f32;
+    
     let schema_bonus = schema
         .map(|schema| {
             schema
@@ -158,7 +177,18 @@ fn adjust_similarity(
         engram_core::RetrievalState::Default => 0.0,
     };
 
-    (similarity + tag_overlap * 0.03 + schema_bonus * 0.04 + mode_bonus).clamp(0.0, 1.0)
+    // Stronger keyword overlap boost: 0.08 per matching tag, 0.05 per content word
+    let keyword_boost = (tag_overlap * 0.08) + (content_overlap * 0.05);
+    (similarity + keyword_boost + schema_bonus * 0.04 + mode_bonus).clamp(0.0, 1.0)
+}
+
+/// Checks if text contains a word boundary match for the term.
+fn content_contains_word(text: &str, term: &str) -> bool {
+    if term.is_empty() || text.is_empty() {
+        return false;
+    }
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == term)
 }
 
 /// Summarizes the activated schema for display and logging.

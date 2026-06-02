@@ -1,4 +1,5 @@
 # AgentMemory
+<img width="960" height="540" alt="image" src="https://github.com/user-attachments/assets/aec828e6-07d4-4bf1-8bcc-5e83e81ff97b" />
 
 A neuroscience-inspired memory architecture for AI agents, built in Rust.
 

@@ -32,7 +32,7 @@ impl DashScopeConfig {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         Ok(Self {
             api_key: api_key.into(),
-            base_url: Url::parse("https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+            base_url: Url::parse("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/")
                 .context("failed to parse DashScope compatible-mode base URL")?,
             rerank_base_url: Url::parse("https://dashscope.aliyuncs.com/api/v1/services/rerank")
                 .context("failed to parse DashScope rerank base URL")?,

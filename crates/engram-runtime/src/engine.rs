@@ -201,7 +201,9 @@ impl MemorySystem {
 
     /// Runs nightly consolidation over the current memory stores.
     pub async fn consolidate(&self) -> Result<Vec<MetaEngram>> {
-        self.consolidation.run(&self.qdrant, &self.postgres).await
+        self.consolidation
+            .run(&self.qdrant, &self.postgres, self.qwen.as_ref())
+            .await
     }
 
     /// Retrieves structured knowledge for a query.

@@ -46,12 +46,10 @@ impl BufferIngestNode {
         plasticity: &PlasticityProfile,
         stc: &SynapticTaggingCapture,
     ) -> Result<PatternEntry> {
-        let embedding = embed_text(&format!(
-            "{} {} {}",
-            episode.action, episode.context, episode.outcome
-        ));
+        let episode_text = format!("{} | {}", episode.action, episode.outcome);
+        let embedding = embed_text(&episode_text);
         let pattern_hash = pattern_hash(&episode.action, &episode.context);
-        let context_tags = token_tags(&episode.context, &episode.outcome);
+        let context_tags = meaningful_tags(&episode.action, &episode.outcome);
 
         let existing: Option<PatternEntry> = store
             .search_patterns(&embedding, 1)
@@ -82,6 +80,9 @@ impl BufferIngestNode {
                 pattern.context_tags.extend(context_tags.clone());
                 pattern.context_tags.sort();
                 pattern.context_tags.dedup();
+                if !pattern.content.contains(&episode_text) {
+                    pattern.content = format!("{}; {}", pattern.content, episode_text);
+                }
                 pattern.decay_rate = plasticity.decay_rate(pattern.decay_rate, signal);
                 if signal.reconsolidation_open || temporal_signal.within_window {
                     pattern.threshold =
@@ -93,6 +94,7 @@ impl BufferIngestNode {
                 pattern_hash,
                 embedding,
                 context_tags,
+                &episode_text,
                 (self.promotion_threshold + assessment.scores.surprise * 0.08
                     - assessment.scores.emotional_valence * 0.03)
                     .clamp(0.0, 1.0),
@@ -136,16 +138,61 @@ fn pattern_hash(action: &str, context: &str) -> String {
     )
 }
 
-/// Extracts a compact tag set from the episode text.
-fn token_tags(left: &str, right: &str) -> Vec<String> {
-    let mut tags: Vec<String> = left
-        .split_whitespace()
-        .chain(right.split_whitespace())
-        .map(|token| token.to_lowercase())
-        .filter(|token| token.len() > 3)
+/// Extracts a compact, meaningful tag set from the episode text.
+/// Stops at 5 tags to avoid noise; only keeps content-bearing words.
+fn meaningful_tags(action: &str, outcome: &str) -> Vec<String> {
+    let text = format!("{} {}", action, outcome).to_lowercase();
+    let stop_words: std::collections::HashSet<&str> = [
+        "the", "and", "for", "you", "are", "was", "with", "from", "that", "this",
+        "have", "had", "been", "they", "them", "than", "then", "when", "what",
+        "where", "which", "will", "would", "could", "should", "there", "their",
+        "about", "into", "over", "after", "before", "above", "below", "between",
+        "under", "again", "further", "here", "how", "more", "most", "other",
+        "some", "such", "only", "own", "same", "so", "than", "too", "very",
+        "just", "now", "also", "its", "does", "did", "done", "doing", "get",
+        "got", "gotten", "give", "gave", "given", "make", "made", "take", "took",
+        "come", "came", "see", "saw", "know", "knew", "think", "thought", "say",
+        "said", "tell", "told", "ask", "asked", "want", "wanted", "use", "used",
+        "find", "found", "work", "worked", "feel", "felt", "try", "tried", "need",
+        "needed", "become", "became", "leave", "left", "put", "bring", "brought",
+        "let", "begin", "began", "seem", "seemed", "help", "helped", "show",
+        "showed", "play", "played", "run", "ran", "move", "moved", "live",
+        "lived", "believe", "believed", "bring", "brought", "happen", "happened",
+        "stand", "stood", "lose", "lost", "pay", "paid", "meet", "met", "include",
+        "included", "continue", "continued", "set", "learn", "learned", "change",
+        "changed", "lead", "led", "understand", "understood", "watch", "watched",
+        "follow", "followed", "stop", "stopped", "create", "created", "speak",
+        "spoke", "read", "allow", "allowed", "add", "added", "spend", "spent",
+        "grow", "grew", "open", "opened", "walk", "walked", "win", "won", "offer",
+        "offered", "remember", "remembered", "love", "loved", "consider", "considered",
+        "appear", "appeared", "buy", "bought", "wait", "waited", "serve", "served",
+        "die", "died", "send", "sent", "expect", "expected", "build", "built",
+        "stay", "stayed", "fall", "fell", "cut", "reach", "reached", "kill",
+        "killed", "remain", "remained", "suggest", "suggested", "raise", "raised",
+        "pass", "passed", "sell", "sold", "require", "required", "report",
+        "reported", "decide", "decided", "pull", "pulled", "like", "liked",
+        "each", "all", "any", "both", "few", "many", "much", "several", "every",
+        "nobody", "nothing", "nowhere", "somebody", "someone", "something",
+        "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "your",
+        "yours", "yourself", "yourselves", "he", "him", "his", "himself",
+        "she", "her", "hers", "herself", "it", "its", "itself", "they",
+        "them", "their", "theirs", "themselves", "a", "an", "as", "at", "by",
+        "in", "is", "it", "of", "on", "to", "am", "can", "may", "one", "two",
+        "three", "four", "five", "not", "no", "but", "or", "if", "because",
+        "until", "while", "do", "does", "did", "has", "had", "having", "being",
+    ].iter().copied().collect();
+
+    let mut tags: Vec<String> = text
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_')
+        .map(|token| token.trim().to_lowercase())
+        .filter(|token| {
+            token.len() > 4
+                && token.chars().any(|ch| ch.is_ascii_alphabetic())
+                && !stop_words.contains(token.as_str())
+        })
         .collect();
     tags.sort();
     tags.dedup();
-    tags.truncate(8);
+    tags.truncate(5);
     tags
 }

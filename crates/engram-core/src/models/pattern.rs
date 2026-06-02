@@ -35,6 +35,8 @@ pub struct PatternEntry {
     pub last_seen: DateTime<Utc>,
     /// Context tags collected from contributing episodes.
     pub context_tags: Vec<String>,
+    /// Human-readable content summary of the contributing episode(s).
+    pub content: String,
     /// Local threshold for promotion into an engram.
     pub threshold: f32,
     /// Decay rate applied when inactive.
@@ -61,6 +63,7 @@ impl PatternEntry {
         pattern_hash: impl Into<String>,
         embedding: Vec<f32>,
         context_tags: Vec<String>,
+        content: impl Into<String>,
         threshold: f32,
         decay_rate: f32,
         source: PatternSource,
@@ -75,6 +78,7 @@ impl PatternEntry {
             first_seen: now,
             last_seen: now,
             context_tags,
+            content: content.into(),
             threshold,
             decay_rate,
             source,

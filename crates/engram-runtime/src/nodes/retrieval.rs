@@ -170,10 +170,10 @@ fn schema_prediction_summary(schema: &MetaEngram) -> String {
     }
 }
 
-/// Builds the final transparent knowledge payload.
+/// Builds the final transparent knowledge payload from actual memory content.
 fn constructive_assembly(
     query: &str,
-    session: &Session,
+    _session: &Session,
     schema: Option<&MetaEngram>,
     schema_prediction: &str,
     candidates: &[RetrievalCandidate],
@@ -182,36 +182,51 @@ fn constructive_assembly(
     let mut inferences = Vec::new();
     let mut gaps = Vec::new();
 
-    for candidate in candidates {
-        facts.push(format!(
-            "engram {} with tags [{}]",
-            candidate.engram.id,
-            candidate.engram.tags.join(", ")
-        ));
-        if let Some(content_ref) = &candidate.engram.episodic_content_ref {
-            facts.push(format!("content_ref {}", content_ref));
+    // Use actual episodic content as facts, not metadata
+    for (index, candidate) in candidates.iter().enumerate() {
+        if let Some(content) = &candidate.engram.episodic_content_ref {
+            // Truncate very long content for the prompt
+            let content = if content.len() > 300 {
+                format!("{}...", &content[..300])
+            } else {
+                content.clone()
+            };
+            facts.push(format!("[{}] {}", index + 1, content));
         }
     }
 
     if let Some(schema) = schema {
         inferences.push(format!(
-            "schema {} suggests {}",
+            "Schema matched: {} (predicts: {})",
             schema.id, schema_prediction
         ));
-        for prediction in &schema.prediction_fields {
-            if !query.to_lowercase().contains(&prediction.to_lowercase()) {
-                gaps.push(format!("expected field missing: {}", prediction));
-            }
+        if schema.tags.len() >= 3 {
+            inferences.push(format!(
+                "Related concepts from long-term memory: {}",
+                schema.tags[..3.min(schema.tags.len())].join(", ")
+            ));
         }
-    } else {
-        gaps.push("no active schema matched this query".to_string());
     }
 
     if candidates.is_empty() {
-        gaps.push(format!(
-            "no engrams matched the current session mode {:?}",
-            session.current_mode
-        ));
+        gaps.push("No relevant memories found for this query.".to_string());
+    } else if facts.is_empty() {
+        gaps.push("Engrams matched but contain no readable content.".to_string());
+    } else {
+        // Only flag a gap if the query asks for something not clearly present
+        let content_combined = facts.join(" ").to_lowercase();
+        let query_lower = query.to_lowercase();
+        // Simple heuristic: if query is a question and content doesn't seem to answer it
+        if query_lower.starts_with("what") || query_lower.starts_with("who") || query_lower.starts_with("where") {
+            let key_terms: Vec<&str> = query_lower
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .filter(|t| t.len() > 4)
+                .collect();
+            let matched = key_terms.iter().filter(|t| content_combined.contains(*t)).count();
+            if matched < key_terms.len().saturating_sub(1) {
+                gaps.push("Retrieved memories may not fully answer this specific question.".to_string());
+            }
+        }
     }
 
     ConstructiveKnowledge {

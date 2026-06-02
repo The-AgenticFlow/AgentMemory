@@ -49,6 +49,18 @@ impl PostgresMemoryStore {
         }
     }
 
+    /// Returns all stored sessions ordered by most recent update.
+    pub async fn list_sessions(&self) -> Result<Vec<Session>> {
+        let mut sessions = self.snapshot().sessions;
+        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        Ok(sessions)
+    }
+
+    /// Returns one session by id if it exists.
+    pub async fn get_session(&self, id: Uuid) -> Result<Option<Session>> {
+        Ok(self.snapshot().sessions.into_iter().find(|session| session.id == id))
+    }
+
     /// Returns all stored schemas.
     pub async fn list_schemas(&self) -> Result<Vec<MetaEngram>> {
         Ok(self.snapshot().schemas)
@@ -83,6 +95,32 @@ impl PostgresMemoryStore {
             context.clone(),
             |entry: &WorkingContext| entry.id,
         );
+        self.persist(snapshot).await
+    }
+
+    /// Returns the latest working context for a session, if any.
+    pub async fn get_working_context(&self, session_id: Uuid) -> Result<Option<WorkingContext>> {
+        Ok(self
+            .snapshot()
+            .working_contexts
+            .into_iter()
+            .filter(|context| context.session_id == session_id)
+            .max_by(|left, right| left.updated_at.cmp(&right.updated_at)))
+    }
+
+    /// Hard-deletes a session and all its related data (working contexts, engrams, schemas).
+    pub async fn delete_session(&self, session_id: Uuid) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        let deleted_engram_ids: Vec<Uuid> = snapshot
+            .engrams
+            .iter()
+            .filter(|e| e.session_ref == session_id)
+            .map(|e| e.id)
+            .collect();
+        snapshot.sessions.retain(|s| s.id != session_id);
+        snapshot.working_contexts.retain(|c| c.session_id != session_id);
+        snapshot.engrams.retain(|e| e.session_ref != session_id);
+        snapshot.schemas.retain(|s| !s.source_engram_ids.iter().any(|eid| deleted_engram_ids.contains(eid)));
         self.persist(snapshot).await
     }
 

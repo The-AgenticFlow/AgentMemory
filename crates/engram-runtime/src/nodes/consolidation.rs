@@ -5,7 +5,12 @@
 
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
+use engram_qwen::{
+    chat::{ChatMessage, ChatRequest},
+    DashScopeClient,
+};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
+use serde::Deserialize;
 
 use crate::embeddings::{cosine_similarity, embed_text};
 use crate::plasticity::PlasticityProfile;
@@ -51,9 +56,10 @@ impl NightlyConsolidationNode {
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
+        qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
         self.decay_engrams(qdrant, postgres).await?;
-        self.compress_schemas(qdrant, postgres).await
+        self.compress_schemas(qdrant, postgres, qwen).await
     }
 
     /// Applies time-based decay and status updates to all active engrams.
@@ -118,6 +124,7 @@ impl NightlyConsolidationNode {
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
+        qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
         let engrams = qdrant.list_engrams().await?;
         let mut created = Vec::new();
@@ -149,7 +156,14 @@ impl NightlyConsolidationNode {
             let embedding = average_embedding(&cluster);
             let tags = cluster_tag_intersection(&cluster);
             let source_engram_ids = cluster.iter().map(|engram| engram.id).collect::<Vec<_>>();
-            let prediction_fields = tags.iter().take(4).cloned().collect::<Vec<_>>();
+            let mut prediction_fields = tags.iter().take(4).cloned().collect::<Vec<_>>();
+            if let Some(qwen) = qwen {
+                if let Ok(extraction) = extract_schema_fields(qwen, &cluster).await {
+                    if !extraction.prediction_fields.is_empty() {
+                        prediction_fields = extraction.prediction_fields;
+                    }
+                }
+            }
             let schema = MetaEngram {
                 id: uuid::Uuid::new_v4(),
                 embedding,
@@ -232,4 +246,48 @@ fn average_embedding(cluster: &[engram_core::EngramEntry]) -> Vec<f32> {
 /// Local helper kept for future schema embedding experiments.
 fn _schema_embedding_for(text: &str) -> Vec<f32> {
     embed_text(text)
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemaExtraction {
+    prediction_fields: Vec<String>,
+    #[serde(rename = "summary")]
+    _summary: Option<String>,
+}
+
+async fn extract_schema_fields(
+    qwen: &DashScopeClient,
+    cluster: &[EngramEntry],
+) -> Result<SchemaExtraction> {
+    let context = cluster
+        .iter()
+        .take(6)
+        .map(|engram| format!("tags: {:?}, content_ref: {:?}", engram.tags, engram.episodic_content_ref))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let request = ChatRequest::new(
+        "qwen-max",
+        vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You extract schema predictions from memory clusters. Return strict JSON with fields prediction_fields (array of short lowercase strings) and summary (optional string).".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: format!(
+                    "Cluster context:\n{}\n\nReturn JSON only.",
+                    context
+                ),
+            },
+        ],
+    );
+
+    let response = qwen.chat(&request).await?;
+    let content = response
+        .choices
+        .first()
+        .map(|choice| choice.message.content.as_str())
+        .unwrap_or("{}");
+    Ok(serde_json::from_str(content)?)
 }

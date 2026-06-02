@@ -1,69 +1,113 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use engram_core::SessionMode;
-use engram_runtime::MemorySystem;
+use reqwest::Url;
+use serde::Serialize;
 
 #[derive(Parser, Debug)]
 #[command(name = "engram-cli")]
-#[command(about = "Local demo and smoke-test CLI for the Engram memory runtime")]
+#[command(about = "Utility client for the Engram server")]
 struct Cli {
+    #[arg(long, default_value = "http://127.0.0.1:3000")]
+    server: String,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Runs a one-shot ingest and retrieve demo.
-    Demo {
+    /// Prints server health.
+    Health,
+    /// Opens a new session and prints the response.
+    OpenSession {
         #[arg(long, default_value = "remember research preferences")]
         expectation: String,
         #[arg(long, default_value = "research assistant task")]
         task_context: String,
-        #[arg(long, default_value = "read paper on memory consolidation")]
-        action: String,
-        #[arg(long, default_value = "successfully stored the paper summary")]
-        outcome: String,
-        #[arg(long, default_value = "memory consolidation paper")]
-        query: String,
+        #[arg(long, default_value = "exploration")]
+        mode: String,
+    },
+    /// Sends one chat message to an existing session.
+    Chat {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        message: String,
     },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let server = Url::parse(&cli.server).context("invalid --server URL")?;
+    let client = reqwest::Client::new();
+
     match cli.command {
-        Command::Demo {
+        Command::Health => {
+            let body = client
+                .get(server.join("health")?)
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?;
+            println!("{}", body);
+        }
+        Command::OpenSession {
             expectation,
             task_context,
-            action,
-            outcome,
-            query,
-        } => demo(expectation, task_context, action, outcome, query).await?,
+            mode,
+        } => {
+            let mode = parse_session_mode(&mode)?;
+            let response = client
+                .post(server.join("sessions")?)
+                .json(&OpenSessionRequest {
+                    user_id: None,
+                    expectation,
+                    mode,
+                    task_context,
+                })
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?;
+            println!("{}", response);
+        }
+        Command::Chat { session, message } => {
+            let response = client
+                .post(server.join(&format!("sessions/{session}/chat"))?)
+                .json(&ChatRequest { message })
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?;
+            println!("{}", response);
+        }
     }
+
     Ok(())
 }
 
-async fn demo(
+fn parse_session_mode(value: &str) -> Result<SessionMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "exploration" => Ok(SessionMode::Exploration),
+        "routine" => Ok(SessionMode::Routine),
+        "critical" => Ok(SessionMode::Critical),
+        other => anyhow::bail!("unknown session mode: {other}"),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct OpenSessionRequest {
+    user_id: Option<uuid::Uuid>,
     expectation: String,
+    mode: SessionMode,
     task_context: String,
-    action: String,
-    outcome: String,
-    query: String,
-) -> Result<()> {
-    let system = MemorySystem::new();
-    let mut handle = system
-        .open_session(None, expectation, SessionMode::Exploration, task_context.clone())
-        .await?;
+}
 
-    let ingestion = system
-        .process_episode(&mut handle, action, task_context, outcome)
-        .await?;
-    let retrieval = system.retrieve(&handle, query).await?;
-    let created_schemas = system.consolidate().await?;
-
-    println!("{}", serde_json::to_string_pretty(&ingestion)?);
-    println!("{}", serde_json::to_string_pretty(&retrieval)?);
-    println!("created_schemas: {}", created_schemas.len());
-
-    Ok(())
+#[derive(Debug, Serialize)]
+struct ChatRequest {
+    message: String,
 }

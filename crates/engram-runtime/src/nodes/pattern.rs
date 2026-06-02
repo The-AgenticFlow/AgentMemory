@@ -58,6 +58,12 @@ impl PatternSepCompNode {
                 engram.tags.dedup();
                 engram.strength = (engram.strength + pattern.strength * 0.2).clamp(0.0, 1.0);
                 engram.touch();
+                // Accumulate content on completion
+                if let Some(ref existing) = engram.episodic_content_ref {
+                    if !existing.contains(&pattern.content) {
+                        engram.episodic_content_ref = Some(format!("{}; {}", existing, pattern.content));
+                    }
+                }
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {
@@ -79,7 +85,7 @@ impl PatternSepCompNode {
                 );
                 engram.kinship_ref = Some(candidate.item.id);
                 engram.strength = pattern.strength;
-                engram.episodic_content_ref = Some(pattern.pattern_hash.clone());
+                engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {
@@ -100,7 +106,7 @@ impl PatternSepCompNode {
                     },
                 );
                 engram.strength = pattern.strength;
-                engram.episodic_content_ref = Some(pattern.pattern_hash.clone());
+                engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
                 PatternDecision {

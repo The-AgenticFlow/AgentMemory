@@ -57,7 +57,11 @@
             <h1 id="session-title">No session selected</h1>
             <span class="header-meta" id="session-subtitle">Start a new chat to begin</span>
           </div>
-          <div class="header-right" id="header-right"></div>
+          <div class="header-right" id="header-right">
+            <button class="edit-goals-btn" id="edit-goals-btn" type="button" title="Edit session goals" style="display:none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            </button>
+          </div>
         </header>
 
         <div class="chat-stage">
@@ -71,10 +75,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   New chat
                 </button>
-                <button class="secondary-btn" id="run-demo-empty" type="button">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                  See how memory works
-                </button>
+
               </div>
               <div class="empty-hint">
                 Toggle <strong>Retrieval</strong> to let the agent search past conversations before replying.
@@ -113,6 +114,26 @@
           </div>
         </footer>
       </main>
+    </div>
+
+    <div class="goal-modal" id="goal-modal">
+      <div class="goal-modal-content">
+        <div class="goal-modal-title">Set Session Goals</div>
+        <div class="goal-modal-body">
+          <div class="goal-field">
+            <label for="goal-task-context">What are you working on?</label>
+            <input type="text" id="goal-task-context" placeholder="e.g. Building a React dashboard" />
+          </div>
+          <div class="goal-field">
+            <label for="goal-expectation">What should the agent do?</label>
+            <input type="text" id="goal-expectation" placeholder="e.g. Help me debug and suggest improvements" />
+          </div>
+        </div>
+        <div class="goal-modal-actions">
+          <button class="goal-modal-btn goal-modal-btn-cancel" id="goal-cancel-btn">Cancel</button>
+          <button class="goal-modal-btn goal-modal-btn-primary" id="goal-start-btn">Start Chat</button>
+        </div>
+      </div>
     </div>
   </body>
 </html>

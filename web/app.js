@@ -23,10 +23,10 @@ const els = {
   sessionList: document.getElementById("session-list"),
   newSessionButton: document.getElementById("new-session-button"),
   newChatEmpty: document.getElementById("new-chat-empty"),
-  runDemoEmpty: document.getElementById("run-demo-empty"),
   sessionTitle: document.getElementById("session-title"),
   sessionSubtitle: document.getElementById("session-subtitle"),
   headerRight: document.getElementById("header-right"),
+  editGoalsBtn: document.getElementById("edit-goals-btn"),
   emptyState: document.getElementById("empty-state"),
   messages: document.getElementById("messages"),
   chatForm: document.getElementById("chat-form"),
@@ -42,6 +42,11 @@ const els = {
   deepSleepInline: document.getElementById("deep-sleep-inline"),
   deepSleepInlineText: document.getElementById("deep-sleep-inline-text"),
   debugToggle: document.getElementById("debug-toggle"),
+  goalModal: document.getElementById("goal-modal"),
+  goalTaskContext: document.getElementById("goal-task-context"),
+  goalExpectation: document.getElementById("goal-expectation"),
+  goalCancelBtn: document.getElementById("goal-cancel-btn"),
+  goalStartBtn: document.getElementById("goal-start-btn"),
 };
 
 bootstrap();
@@ -74,9 +79,20 @@ async function bootstrap() {
 }
 
 function wireEvents() {
-  els.newSessionButton.addEventListener("click", () => createSession());
-  if (els.newChatEmpty) els.newChatEmpty.addEventListener("click", () => createSession());
-  if (els.runDemoEmpty) els.runDemoEmpty.addEventListener("click", runDemo);
+  els.newSessionButton.addEventListener("click", () => showGoalModal());
+  if (els.newChatEmpty) els.newChatEmpty.addEventListener("click", () => showGoalModal());
+  els.goalCancelBtn.addEventListener("click", () => hideGoalModal());
+  els.goalStartBtn.addEventListener("click", () => startSessionFromGoals());
+  els.goalModal.addEventListener("click", (e) => {
+    if (e.target === els.goalModal) hideGoalModal();
+  });
+  els.editGoalsBtn.addEventListener("click", () => showGoalModal(true));
+  els.goalTaskContext.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); els.goalExpectation.focus(); }
+  });
+  els.goalExpectation.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); startSessionFromGoals(); }
+  });
   els.chatForm.addEventListener("submit", onSendMessage);
   els.chatInput.addEventListener("input", () => autoResize(els.chatInput));
   els.chatInput.addEventListener("keydown", async (event) => {
@@ -252,6 +268,58 @@ async function createSession(options = {}) {
   await selectSession(response.session.session.id);
   if (options.scroll !== false) scrollMessagesToBottom();
   return response;
+}
+
+function showGoalModal(editing = false) {
+  els.goalTaskContext.value = "";
+  els.goalExpectation.value = "";
+  if (editing && state.selectedSessionId) {
+    const entry = state.sessions.find(s => s.session.session.id === state.selectedSessionId);
+    if (entry) {
+      els.goalTaskContext.value = entry.session.session.task_context || "";
+      els.goalExpectation.value = entry.session.session.current_expectation || "";
+      els.goalStartBtn.textContent = "Save";
+    }
+  } else {
+    els.goalStartBtn.textContent = "Start Chat";
+  }
+  els.goalModal.classList.add("show");
+  setTimeout(() => els.goalTaskContext.focus(), 100);
+}
+
+function hideGoalModal() {
+  els.goalModal.classList.remove("show");
+}
+
+async function startSessionFromGoals() {
+  const taskContext = els.goalTaskContext.value.trim();
+  const expectation = els.goalExpectation.value.trim();
+  if (!taskContext && !expectation) return;
+
+  hideGoalModal();
+
+  if (state.selectedSessionId && els.goalStartBtn.textContent === "Save") {
+    await fetchJson(`/sessions/${state.selectedSessionId}`, {
+      method: "PUT",
+      body: {
+        user_id: null,
+        expectation: expectation || "help me with this task",
+        mode: "Exploration",
+        task_context: taskContext || "general chat",
+      },
+    });
+    await refreshSessions({ preserveSelection: true });
+    if (state.selectedSessionId) {
+      await selectSession(state.selectedSessionId, { scroll: false });
+    }
+    return;
+  }
+
+  await createSession({
+    expectation: expectation || "help me with this task",
+    taskContext: taskContext || "general chat",
+    mode: "Exploration",
+  });
 }
 
 async function closeSession(sessionId) {

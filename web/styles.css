@@ -677,6 +677,89 @@ body {
   color: var(--text);
 }
 
+/* Goal setup modal */
+.goal-modal {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100; opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.goal-modal.show {
+  opacity: 1; pointer-events: auto;
+}
+.goal-modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 420px; width: 90%;
+}
+.goal-modal-title {
+  font-size: 0.95rem; font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+.goal-modal-body {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-bottom: 16px;
+}
+.goal-field label {
+  display: block; font-size: 0.78rem; font-weight: 500;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.goal-field input {
+  width: 100%; padding: 8px 10px;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text);
+  font-size: 0.85rem; outline: none;
+  transition: border-color 0.15s;
+}
+.goal-field input:focus {
+  border-color: var(--border-strong);
+}
+.goal-field input::placeholder {
+  color: var(--text-dim);
+}
+.goal-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.goal-modal-btn {
+  padding: 8px 16px; border-radius: 6px;
+  border: none; font-weight: 500; font-size: 0.82rem;
+  cursor: pointer; transition: all 0.15s;
+}
+.goal-modal-btn-primary {
+  background: var(--accent-secondary);
+  color: #fff;
+}
+.goal-modal-btn-primary:hover {
+  background: var(--accent-secondary-hover);
+}
+.goal-modal-btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.goal-modal-btn-cancel:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Edit goals button */
+.edit-goals-btn {
+  width: 28px; height: 28px; border-radius: 6px;
+  display: grid; place-items: center;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer;
+  transition: all 0.15s;
+}
+.edit-goals-btn:hover {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .sidebar { position: fixed; left: 0; top: 0; bottom: 0;

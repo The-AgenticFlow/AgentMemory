@@ -8,6 +8,7 @@ use engram_core::{MetaEngram, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
 use crate::adaptive::AdaptiveThresholdState;
+use crate::config::RetrievalConfig;
 use crate::embeddings::{cosine_similarity, embed_text};
 use crate::nodes::schema::SchemaActivationNode;
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
@@ -26,6 +27,11 @@ impl Default for RetrievalArchitectureNode {
 }
 
 impl RetrievalArchitectureNode {
+    pub fn with_config(mut self, config: &RetrievalConfig) -> Self {
+        self.top_k = config.top_k;
+        self
+    }
+
     pub async fn retrieve(
         &self,
         query: String,

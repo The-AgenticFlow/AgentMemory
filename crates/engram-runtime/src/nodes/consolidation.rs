@@ -13,6 +13,7 @@ use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
 
 use crate::embeddings::{cosine_similarity, embed_text};
+use crate::config::ConsolidationConfig;
 use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
 
@@ -51,6 +52,16 @@ impl Default for NightlyConsolidationNode {
 }
 
 impl NightlyConsolidationNode {
+    pub fn with_config(mut self, config: &ConsolidationConfig) -> Self {
+        self.active_threshold = config.active_threshold;
+        self.archive_threshold = config.archive_threshold;
+        self.schema_threshold = config.schema_threshold;
+        self.base_decay_rate = config.base_decay_rate;
+        self.valence_decay_factor = config.valence_decay_factor;
+        self.surprise_decay_factor = config.surprise_decay_factor;
+        self
+    }
+
     /// Runs decay followed by schema compression.
     pub async fn run(
         &self,

@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use engram_qwen::{DashScopeClient, DashScopeConfig};
-use engram_server::{build_app, AppState};
+use engram_server::{build_app, mcp, AppState};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -13,13 +13,19 @@ async fn main() -> anyhow::Result<()> {
 
     init_tracing();
 
+    if std::env::args().nth(1).as_deref() == Some("mcp-stdio") {
+        let state = app_state_from_env().await?;
+        mcp::run_stdio(state).await?;
+        return Ok(());
+    }
+
     let addr = std::env::var("ENGRAM_SERVER_ADDR")
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 3000)));
 
     let listener = TcpListener::bind(addr).await?;
-    let app = build_app(app_state_from_env()?);
+    let app = build_app(app_state_from_env().await?);
 
     println!("engram-server listening on http://{addr}");
     axum::serve(listener, app).await?;
@@ -33,7 +39,7 @@ fn init_tracing() {
         .try_init();
 }
 
-fn app_state_from_env() -> anyhow::Result<AppState> {
+async fn app_state_from_env() -> anyhow::Result<AppState> {
     let mut state = AppState::default();
     let require_qwen = std::env::var("ENGRAM_REQUIRE_QWEN")
         .ok()
@@ -55,5 +61,6 @@ fn app_state_from_env() -> anyhow::Result<AppState> {
         }
     }
 
+    state.system.initialize().await?;
     Ok(state)
 }

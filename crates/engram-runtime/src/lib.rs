@@ -7,6 +7,7 @@
 //! by the agent loop.
 
 pub mod adaptive;
+pub mod config;
 pub mod embeddings;
 pub mod engine;
 pub mod flows;
@@ -15,7 +16,11 @@ pub mod plasticity;
 pub mod stc;
 pub mod types;
 
-pub use engine::MemorySystem;
+pub use config::RuntimeConfig;
+pub use engine::{
+    ControlGraph, ControlGraphEdge, ControlGraphNode, MemoryCounts, MemorySystem, RuntimeOverview,
+    ThalamusSimulation,
+};
 pub use flows::{AgentLoopFlow, ConsolidationFlow, IngestionFlow, RetrievalFlow};
 pub use types::{
     ConstructiveKnowledge, IngestionOutcome, RetrievalCandidate, RetrievalOutcome, SessionHandle,

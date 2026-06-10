@@ -53,6 +53,11 @@ impl QdrantMemoryStore {
         Ok(self.snapshot().engrams)
     }
 
+    /// Returns all buffered patterns.
+    pub async fn list_patterns(&self) -> Result<Vec<PatternEntry>> {
+        Ok(self.snapshot().patterns)
+    }
+
     /// Searches for nearby engrams in the vector index.
     pub async fn search_engrams(
         &self,

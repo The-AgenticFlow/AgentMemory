@@ -2,3 +2,5 @@
 /.env
 **/*.rs.bk
 **/.agent-memory/**
+/web/dist/
+/web/node_modules/

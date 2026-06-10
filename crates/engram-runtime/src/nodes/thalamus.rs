@@ -6,6 +6,8 @@
 
 use engram_core::{EngramEntry, Episode, Session, SessionMode, ThalamusScores};
 
+use crate::config::ThalamusConfig;
+
 /// Full assessment produced by the thalamus filter.
 #[derive(Debug, Clone, Copy)]
 pub struct ThalamusAssessment {
@@ -40,6 +42,31 @@ impl ThalamusFilterNode {
         session: &Session,
         recent_engrams: Vec<EngramEntry>,
     ) -> ThalamusAssessment {
+        self.score_episode_with_config(
+            episode,
+            session,
+            recent_engrams,
+            &ThalamusConfig {
+                novelty_weight: self.novelty_weight.max(0.25),
+                surprise_weight: self.surprise_weight.max(0.25),
+                task_relevance_weight: self.task_relevance_weight.max(0.25),
+                valence_weight: self.valence_weight.max(0.25),
+                exploration_threshold: 0.35,
+                routine_threshold: 0.55,
+                critical_threshold: 0.0,
+            },
+        )
+        .await
+    }
+
+    /// Scores one episode using the active dashboard/runtime config.
+    pub async fn score_episode_with_config(
+        &self,
+        episode: &Episode,
+        session: &Session,
+        recent_engrams: Vec<EngramEntry>,
+        config: &ThalamusConfig,
+    ) -> ThalamusAssessment {
         let task_relevance = string_overlap(&episode.context, &session.task_context);
         let surprise = mismatch_score(&session.current_expectation, &episode.outcome);
         let emotional_valence = valence_score(&episode.outcome);
@@ -52,15 +79,15 @@ impl ThalamusFilterNode {
             emotional_valence,
         };
 
-        let score = scores.novelty * self.novelty_weight.max(0.25)
-            + scores.surprise * self.surprise_weight.max(0.25)
-            + scores.task_relevance * self.task_relevance_weight.max(0.25)
-            + scores.emotional_valence * self.valence_weight.max(0.25);
+        let score = scores.novelty * config.novelty_weight
+            + scores.surprise * config.surprise_weight
+            + scores.task_relevance * config.task_relevance_weight
+            + scores.emotional_valence * config.valence_weight;
 
         let threshold = match session.current_mode {
-            SessionMode::Exploration => 0.35,
-            SessionMode::Routine => 0.55,
-            SessionMode::Critical => 0.0,
+            SessionMode::Exploration => config.exploration_threshold,
+            SessionMode::Routine => config.routine_threshold,
+            SessionMode::Critical => config.critical_threshold,
         };
 
         ThalamusAssessment {

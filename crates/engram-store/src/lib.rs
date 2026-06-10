@@ -1,6 +1,7 @@
 //! Storage adapters used by the runtime memory system.
 
 pub mod oss;
+pub mod neo4j;
 pub mod postgres;
 pub mod qdrant;
 
@@ -12,5 +13,6 @@ pub struct Scored<T> {
 }
 
 pub use oss::OssMemoryStore;
-pub use postgres::PostgresMemoryStore;
+pub use neo4j::{Neo4jConfig, Neo4jHealth, Neo4jMemoryStore};
+pub use postgres::{ConfigAuditRecord, IngestionRecord, PostgresMemoryStore};
 pub use qdrant::QdrantMemoryStore;

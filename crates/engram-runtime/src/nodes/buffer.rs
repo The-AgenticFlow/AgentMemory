@@ -6,6 +6,7 @@
 use anyhow::Result;
 use engram_core::{PatternEntry, PatternSource};
 
+use crate::config::BufferConfig;
 use crate::embeddings::embed_text;
 use crate::nodes::thalamus::ThalamusAssessment;
 use crate::plasticity::PlasticityProfile;
@@ -36,6 +37,14 @@ impl Default for BufferIngestNode {
 }
 
 impl BufferIngestNode {
+    /// Returns a copy of the node with dashboard-configured parameters.
+    pub fn with_config(mut self, config: &BufferConfig) -> Self {
+        self.similarity_threshold = config.similarity_threshold;
+        self.promotion_threshold = config.promotion_threshold;
+        self.decay_rate = config.decay_rate;
+        self
+    }
+
     /// Inserts the episode into the buffer or updates the nearest pattern.
     pub async fn ingest(
         &self,

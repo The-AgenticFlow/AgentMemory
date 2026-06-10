@@ -1,10 +1,19 @@
+FROM node:22-bookworm AS web-builder
+
+WORKDIR /app/web
+
+COPY web/package.json ./
+RUN npm install
+COPY web ./
+RUN npm run build
+
 FROM rust:bookworm AS builder
 
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-COPY web ./web
+COPY --from=web-builder /app/web/dist ./web/dist
 
 RUN cargo build --release -p engram-server
 
@@ -21,7 +30,7 @@ RUN apt-get update \
     && mkdir -p /data
 
 COPY --from=builder /app/target/release/engram-server /usr/local/bin/engram-server
-COPY --from=builder /app/web ./web
+COPY --from=web-builder /app/web/dist ./web/dist
 
 RUN useradd --create-home --uid 10001 engram \
     && chown -R engram:engram /app /data

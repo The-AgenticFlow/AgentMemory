@@ -4,12 +4,18 @@
 //! state used to run ingestion, retrieval, and consolidation end to end.
 
 use anyhow::Result;
-use engram_core::{Episode, MetaEngram, Session, SessionMode, WorkingContext};
+use engram_core::{Episode, MetaEngram, Session, SessionMode, ThalamusScores, WorkingContext};
 use engram_qwen::DashScopeClient;
-use engram_store::{OssMemoryStore, PostgresMemoryStore, QdrantMemoryStore};
-use std::sync::{Arc, Mutex};
+use engram_store::{
+    ConfigAuditRecord, IngestionRecord, Neo4jHealth, Neo4jMemoryStore, OssMemoryStore,
+    PostgresMemoryStore, QdrantMemoryStore,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::adaptive::AdaptiveThresholdState;
+use crate::config::RuntimeConfig;
 use crate::embeddings::embed_text;
 use crate::nodes::buffer::BufferIngestNode;
 use crate::nodes::consolidation::NightlyConsolidationNode;
@@ -23,6 +29,8 @@ use crate::types::{IngestionOutcome, RetrievalOutcome, SessionHandle};
 /// Central coordinator for all runtime memory operations.
 #[derive(Clone)]
 pub struct MemorySystem {
+    /// Primary graph backend for deployment.
+    pub neo4j: Neo4jMemoryStore,
     /// Vector store for engrams and buffer patterns.
     pub qdrant: QdrantMemoryStore,
     /// Relational metadata store.
@@ -38,7 +46,65 @@ pub struct MemorySystem {
     retrieval: RetrievalArchitectureNode,
     plasticity: PlasticityProfile,
     stc: SynapticTaggingCapture,
+    config: Arc<RwLock<RuntimeConfig>>,
     adaptive: Arc<Mutex<AdaptiveThresholdState>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCounts {
+    pub sessions: usize,
+    pub working_contexts: usize,
+    pub episodes: usize,
+    pub patterns: usize,
+    pub engrams: usize,
+    pub schemas: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeOverview {
+    pub counts: MemoryCounts,
+    pub latest_scores: Vec<IngestionRecord>,
+    pub active_config: RuntimeConfig,
+    pub neo4j: Neo4jHealth,
+    pub mcp: McpStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpStatus {
+    pub http_enabled: bool,
+    pub stdio_enabled: bool,
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlGraph {
+    pub nodes: Vec<ControlGraphNode>,
+    pub edges: Vec<ControlGraphEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlGraphNode {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub title: String,
+    pub properties: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlGraphEdge {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThalamusSimulation {
+    pub accepted: bool,
+    pub score: f32,
+    pub threshold: f32,
+    pub scores: ThalamusScores,
 }
 
 impl Default for MemorySystem {
@@ -51,6 +117,7 @@ impl MemorySystem {
     /// Creates a runtime with default local adapters and node settings.
     pub fn new() -> Self {
         Self {
+            neo4j: Neo4jMemoryStore::default(),
             qdrant: QdrantMemoryStore::default(),
             postgres: PostgresMemoryStore::default(),
             oss: OssMemoryStore::default(),
@@ -62,6 +129,7 @@ impl MemorySystem {
             retrieval: RetrievalArchitectureNode::default(),
             plasticity: PlasticityProfile::default(),
             stc: SynapticTaggingCapture::default(),
+            config: Arc::new(RwLock::new(RuntimeConfig::default())),
             adaptive: Arc::new(Mutex::new(AdaptiveThresholdState::default())),
         }
     }
@@ -70,6 +138,63 @@ impl MemorySystem {
     pub fn with_qwen(mut self, qwen: DashScopeClient) -> Self {
         self.qwen = Some(qwen);
         self
+    }
+
+    /// Loads persisted runtime config and initializes the graph backend.
+    pub async fn initialize(&self) -> Result<()> {
+        self.neo4j.initialize().await?;
+        if let Some(value) = self.postgres.get_config_profile().await? {
+            match serde_json::from_value::<RuntimeConfig>(value) {
+                Ok(config) if config.validate().is_ok() => {
+                    *self.config.write().expect("RuntimeConfig lock poisoned") = config;
+                }
+                _ => {
+                    tracing::warn!("stored runtime config is invalid; keeping defaults");
+                }
+            }
+        } else {
+            self.persist_config("system", RuntimeConfig::default()).await?;
+        }
+        Ok(())
+    }
+
+    pub fn runtime_config(&self) -> RuntimeConfig {
+        self.config
+            .read()
+            .expect("RuntimeConfig lock poisoned")
+            .clone()
+    }
+
+    pub async fn update_config(&self, actor: &str, mut config: RuntimeConfig) -> Result<RuntimeConfig> {
+        config.validate().map_err(anyhow::Error::msg)?;
+        config.version = self.runtime_config().version.saturating_add(1);
+        self.persist_config(actor, config.clone()).await?;
+        *self.config.write().expect("RuntimeConfig lock poisoned") = config.clone();
+        Ok(config)
+    }
+
+    pub async fn reset_config(&self, actor: &str) -> Result<RuntimeConfig> {
+        let mut config = RuntimeConfig::default();
+        config.version = self.runtime_config().version.saturating_add(1);
+        self.persist_config(actor, config.clone()).await?;
+        *self.config.write().expect("RuntimeConfig lock poisoned") = config.clone();
+        Ok(config)
+    }
+
+    async fn persist_config(&self, actor: &str, config: RuntimeConfig) -> Result<()> {
+        let value = serde_json::to_value(&config)?;
+        let audit = ConfigAuditRecord {
+            id: uuid::Uuid::new_v4(),
+            actor: actor.to_string(),
+            version: config.version,
+            change: value.clone(),
+            created_at: chrono::Utc::now(),
+        };
+        self.postgres.save_config_profile(value.clone(), audit).await?;
+        if let Err(error) = self.neo4j.upsert_config(config.version, &value, actor).await {
+            tracing::warn!("Neo4j config sync failed: {error}");
+        }
+        Ok(())
     }
 
     /// Opens and persists a new session handle.
@@ -82,6 +207,9 @@ impl MemorySystem {
     ) -> Result<SessionHandle> {
         let session = Session::new(user_id, expectation, mode, task_context);
         self.postgres.save_session(&session).await?;
+        if let Err(error) = self.neo4j.upsert_session(&session).await {
+            tracing::warn!("Neo4j session sync failed: {error}");
+        }
         Ok(SessionHandle {
             session,
             working_context: None,
@@ -98,13 +226,20 @@ impl MemorySystem {
     ) -> Result<()> {
         handle.session.update(expectation, mode, task_context);
         self.postgres.save_session(&handle.session).await?;
+        if let Err(error) = self.neo4j.upsert_session(&handle.session).await {
+            tracing::warn!("Neo4j session sync failed: {error}");
+        }
         Ok(())
     }
 
     /// Marks the session as closed.
     pub async fn close_session(&self, handle: &mut SessionHandle) -> Result<()> {
         handle.session.close();
-        self.postgres.save_session(&handle.session).await
+        self.postgres.save_session(&handle.session).await?;
+        if let Err(error) = self.neo4j.upsert_session(&handle.session).await {
+            tracing::warn!("Neo4j session sync failed: {error}");
+        }
+        Ok(())
     }
 
     /// Opens a task-local working context for the current session.
@@ -115,6 +250,9 @@ impl MemorySystem {
     ) -> Result<()> {
         let context = WorkingContext::new(handle.session.id, task_id);
         self.postgres.save_working_context(&context).await?;
+        if let Err(error) = self.neo4j.upsert_working_context(&context).await {
+            tracing::warn!("Neo4j working-context sync failed: {error}");
+        }
         handle.working_context = Some(context);
         Ok(())
     }
@@ -128,12 +266,20 @@ impl MemorySystem {
         outcome: impl Into<String>,
     ) -> Result<IngestionOutcome> {
         let episode = Episode::new(action, context, outcome, handle.session.id);
+        let config = self.runtime_config();
         let scores = self
             .thalamus
-            .score_episode(&episode, &handle.session, self.qdrant.list_engrams().await?)
+            .score_episode_with_config(
+                &episode,
+                &handle.session,
+                self.qdrant.list_engrams().await?,
+                &config.thalamus,
+            )
             .await;
 
         if !scores.accepted {
+            self.postgres.save_episode(&episode).await?;
+            self.record_ingestion(&episode, &scores, None, None).await?;
             return Ok(IngestionOutcome {
                 state: engram_core::IngestionState::Rejected,
                 accepted: false,
@@ -149,7 +295,7 @@ impl MemorySystem {
                 .lock()
                 .expect("AdaptiveThresholdState mutex poisoned");
             adaptive.completion_threshold(
-                self.pattern.completion_threshold,
+                config.pattern.completion_threshold,
                 handle.session.current_mode,
                 scores.scores.surprise,
                 scores.scores.emotional_valence,
@@ -158,6 +304,7 @@ impl MemorySystem {
 
         let pattern = self
             .buffer
+            .with_config(&config.buffer)
             .ingest(
                 &episode,
                 &scores,
@@ -179,6 +326,7 @@ impl MemorySystem {
             .await?;
 
         let episode_blob = serde_json::to_vec(&episode)?;
+        self.postgres.save_episode(&episode).await?;
         self.oss
             .put_episode_blob(&episode.id.to_string(), &episode_blob)
             .await?;
@@ -188,6 +336,26 @@ impl MemorySystem {
             context.active_engrams.push(decision.engram.id);
             context.updated_at = chrono::Utc::now();
             self.postgres.save_working_context(context).await?;
+            if let Err(error) = self.neo4j.upsert_working_context(context).await {
+                tracing::warn!("Neo4j working-context sync failed: {error}");
+            }
+        }
+
+        self.record_ingestion(
+            &episode,
+            &scores,
+            Some(pattern.pattern_hash.clone()),
+            Some(decision.engram.id),
+        )
+        .await?;
+        if let Err(error) = self.neo4j.upsert_episode(&episode).await {
+            tracing::warn!("Neo4j episode sync failed: {error}");
+        }
+        if let Err(error) = self.neo4j.upsert_pattern(&pattern, handle.session.id).await {
+            tracing::warn!("Neo4j pattern sync failed: {error}");
+        }
+        if let Err(error) = self.neo4j.upsert_engram(&decision.engram, Some(&pattern.pattern_hash)).await {
+            tracing::warn!("Neo4j engram sync failed: {error}");
         }
 
         Ok(IngestionOutcome {
@@ -201,9 +369,17 @@ impl MemorySystem {
 
     /// Runs nightly consolidation over the current memory stores.
     pub async fn consolidate(&self) -> Result<Vec<MetaEngram>> {
-        self.consolidation
+        let config = self.runtime_config();
+        let created = self.consolidation
+            .with_config(&config.consolidation)
             .run(&self.qdrant, &self.postgres, self.qwen.as_ref())
-            .await
+            .await?;
+        for schema in &created {
+            if let Err(error) = self.neo4j.upsert_schema(schema).await {
+                tracing::warn!("Neo4j schema sync failed: {error}");
+            }
+        }
+        Ok(created)
     }
 
     /// Retrieves structured knowledge for a query.
@@ -220,6 +396,7 @@ impl MemorySystem {
         };
         let outcome = self
             .retrieval
+            .with_config(&self.runtime_config().retrieval)
             .retrieve(
                 query.into(),
                 &handle.session,
@@ -231,7 +408,7 @@ impl MemorySystem {
         self.adaptive
             .lock()
             .expect("AdaptiveThresholdState mutex poisoned")
-            .update_from_retrieval(&outcome);
+            .update_from_retrieval_with_config(&outcome, &self.runtime_config().adaptive);
 
         if let Some(context) = handle.working_context.as_ref() {
             let mut updated_context = context.clone();
@@ -243,9 +420,179 @@ impl MemorySystem {
             updated_context.inference_layer = outcome.knowledge.inferences.clone();
             updated_context.updated_at = chrono::Utc::now();
             self.postgres.save_working_context(&updated_context).await?;
+            if let Err(error) = self.neo4j.upsert_working_context(&updated_context).await {
+                tracing::warn!("Neo4j working-context sync failed: {error}");
+            }
         }
 
         Ok(outcome)
+    }
+
+    pub async fn simulate_thalamus(
+        &self,
+        session: &Session,
+        action: impl Into<String>,
+        context: impl Into<String>,
+        outcome: impl Into<String>,
+    ) -> Result<ThalamusSimulation> {
+        let episode = Episode::new(action, context, outcome, session.id);
+        let assessment = self
+            .thalamus
+            .score_episode_with_config(
+                &episode,
+                session,
+                self.qdrant.list_engrams().await?,
+                &self.runtime_config().thalamus,
+            )
+            .await;
+        Ok(ThalamusSimulation {
+            accepted: assessment.accepted,
+            score: assessment.score,
+            threshold: assessment.threshold,
+            scores: assessment.scores,
+        })
+    }
+
+    pub async fn overview(&self) -> Result<RuntimeOverview> {
+        let mut latest_scores = self.postgres.list_ingestion_records().await?;
+        latest_scores.truncate(12);
+        Ok(RuntimeOverview {
+            counts: self.counts().await?,
+            latest_scores,
+            active_config: self.runtime_config(),
+            neo4j: self.neo4j.health().await,
+            mcp: McpStatus {
+                http_enabled: std::env::var("ENGRAM_MCP_HTTP_ENABLED")
+                    .map(|v| !v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(true),
+                stdio_enabled: std::env::var("ENGRAM_MCP_STDIO_ENABLED")
+                    .map(|v| !v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(true),
+                endpoint: "/mcp".to_string(),
+            },
+        })
+    }
+
+    pub async fn counts(&self) -> Result<MemoryCounts> {
+        Ok(MemoryCounts {
+            sessions: self.postgres.list_sessions().await?.len(),
+            working_contexts: self.postgres.list_working_contexts().await?.len(),
+            episodes: self.postgres.list_episodes().await?.len(),
+            patterns: self.qdrant.list_patterns().await?.len(),
+            engrams: self.qdrant.list_engrams().await?.len(),
+            schemas: self.postgres.list_schemas().await?.len(),
+        })
+    }
+
+    pub async fn control_graph(&self) -> Result<ControlGraph> {
+        let sessions = self.postgres.list_sessions().await?;
+        let contexts = self.postgres.list_working_contexts().await?;
+        let episodes = self.postgres.list_episodes().await?;
+        let patterns = self.qdrant.list_patterns().await?;
+        let engrams = self.qdrant.list_engrams().await?;
+        let schemas = self.postgres.list_schemas().await?;
+
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        for session in sessions {
+            nodes.push(ControlGraphNode {
+                id: session.id.to_string(),
+                label: "Session".to_string(),
+                kind: "session".to_string(),
+                title: session.task_context.clone(),
+                properties: serde_json::to_value(&session)?,
+            });
+        }
+        for context in contexts {
+            nodes.push(ControlGraphNode {
+                id: context.id.to_string(),
+                label: "WorkingContext".to_string(),
+                kind: "working_context".to_string(),
+                title: context.task_id.clone(),
+                properties: serde_json::to_value(&context)?,
+            });
+            edges.push(edge(context.session_id, context.id, "ACTIVATES"));
+        }
+        for episode in episodes {
+            nodes.push(ControlGraphNode {
+                id: episode.id.to_string(),
+                label: "Episode".to_string(),
+                kind: "episode".to_string(),
+                title: episode.action.clone(),
+                properties: serde_json::to_value(&episode)?,
+            });
+            edges.push(edge(episode.session_id, episode.id, "CAPTURED"));
+        }
+        for pattern in patterns {
+            nodes.push(ControlGraphNode {
+                id: pattern.pattern_hash.clone(),
+                label: "Pattern".to_string(),
+                kind: "pattern".to_string(),
+                title: pattern.context_tags.join(", "),
+                properties: serde_json::to_value(&pattern)?,
+            });
+            for episode_id in &pattern.episode_refs {
+                edges.push(ControlGraphEdge {
+                    id: format!("{episode_id}:BUFFERED_AS:{}", pattern.pattern_hash),
+                    source: episode_id.to_string(),
+                    target: pattern.pattern_hash.clone(),
+                    label: "BUFFERED_AS".to_string(),
+                });
+            }
+        }
+        for engram in engrams {
+            nodes.push(ControlGraphNode {
+                id: engram.id.to_string(),
+                label: "Engram".to_string(),
+                kind: "engram".to_string(),
+                title: engram.tags.join(", "),
+                properties: serde_json::to_value(&engram)?,
+            });
+            edges.push(edge(engram.session_ref, engram.id, "PROMOTED_TO"));
+            if let Some(kinship) = engram.kinship_ref {
+                edges.push(edge(engram.id, kinship, "KINSHIP"));
+            }
+            for schema_id in &engram.schema_refs {
+                edges.push(edge(engram.id, *schema_id, "SOURCE_OF"));
+            }
+        }
+        for schema in schemas {
+            nodes.push(ControlGraphNode {
+                id: schema.id.to_string(),
+                label: "Schema".to_string(),
+                kind: "schema".to_string(),
+                title: schema.tags.join(", "),
+                properties: serde_json::to_value(&schema)?,
+            });
+            for engram_id in &schema.source_engram_ids {
+                edges.push(edge(*engram_id, schema.id, "SOURCE_OF"));
+            }
+        }
+
+        Ok(ControlGraph { nodes, edges })
+    }
+
+    async fn record_ingestion(
+        &self,
+        episode: &Episode,
+        assessment: &crate::nodes::thalamus::ThalamusAssessment,
+        pattern_hash: Option<String>,
+        engram_id: Option<uuid::Uuid>,
+    ) -> Result<()> {
+        self.postgres
+            .save_ingestion_record(&IngestionRecord {
+                id: uuid::Uuid::new_v4(),
+                episode_id: episode.id,
+                session_id: episode.session_id,
+                accepted: assessment.accepted,
+                score: assessment.score,
+                threshold: assessment.threshold,
+                thalamus_scores: assessment.scores,
+                pattern_hash,
+                engram_id,
+                created_at: chrono::Utc::now(),
+            })
+            .await
     }
 }
 
@@ -253,5 +600,14 @@ impl MemorySystem {
     /// Local deterministic embedding fallback used by the runtime.
     pub fn pseudo_embedding(&self, text: &str) -> Vec<f32> {
         embed_text(text)
+    }
+}
+
+fn edge(source: uuid::Uuid, target: uuid::Uuid, label: &str) -> ControlGraphEdge {
+    ControlGraphEdge {
+        id: format!("{source}:{label}:{target}"),
+        source: source.to_string(),
+        target: target.to_string(),
+        label: label.to_string(),
     }
 }

@@ -9,16 +9,51 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use engram_core::{EngramEntry, MetaEngram, Session, WorkingContext};
+use engram_core::{EngramEntry, Episode, MetaEngram, Session, WorkingContext};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PostgresSnapshot {
+    #[serde(default)]
+    episodes: Vec<Episode>,
+    #[serde(default)]
     engrams: Vec<EngramEntry>,
+    #[serde(default)]
     schemas: Vec<MetaEngram>,
+    #[serde(default)]
     sessions: Vec<Session>,
+    #[serde(default)]
     working_contexts: Vec<WorkingContext>,
+    #[serde(default)]
+    ingestion_records: Vec<IngestionRecord>,
+    #[serde(default)]
+    config_profile: Option<serde_json::Value>,
+    #[serde(default)]
+    config_audit: Vec<ConfigAuditRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngestionRecord {
+    pub id: Uuid,
+    pub episode_id: Uuid,
+    pub session_id: Uuid,
+    pub accepted: bool,
+    pub score: f32,
+    pub threshold: f32,
+    pub thalamus_scores: engram_core::ThalamusScores,
+    pub pattern_hash: Option<String>,
+    pub engram_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigAuditRecord {
+    pub id: Uuid,
+    pub actor: String,
+    pub version: u64,
+    pub change: serde_json::Value,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug)]
@@ -56,6 +91,20 @@ impl PostgresMemoryStore {
         Ok(sessions)
     }
 
+    /// Returns all stored episodes ordered by most recent creation.
+    pub async fn list_episodes(&self) -> Result<Vec<Episode>> {
+        let mut episodes = self.snapshot().episodes;
+        episodes.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(episodes)
+    }
+
+    /// Persists one raw episode record for dashboard inspection.
+    pub async fn save_episode(&self, episode: &Episode) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        upsert_by_id(&mut snapshot.episodes, episode.clone(), |entry: &Episode| entry.id);
+        self.persist(snapshot).await
+    }
+
     /// Returns one session by id if it exists.
     pub async fn get_session(&self, id: Uuid) -> Result<Option<Session>> {
         Ok(self.snapshot().sessions.into_iter().find(|session| session.id == id))
@@ -64,6 +113,27 @@ impl PostgresMemoryStore {
     /// Returns all stored schemas.
     pub async fn list_schemas(&self) -> Result<Vec<MetaEngram>> {
         Ok(self.snapshot().schemas)
+    }
+
+    /// Returns all stored engram metadata ordered by creation time.
+    pub async fn list_engrams(&self) -> Result<Vec<EngramEntry>> {
+        let mut engrams = self.snapshot().engrams;
+        engrams.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(engrams)
+    }
+
+    /// Returns ingestion score records ordered by newest first.
+    pub async fn list_ingestion_records(&self) -> Result<Vec<IngestionRecord>> {
+        let mut records = self.snapshot().ingestion_records;
+        records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(records)
+    }
+
+    /// Persists a structured ingestion score record.
+    pub async fn save_ingestion_record(&self, record: &IngestionRecord) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        upsert_by_id(&mut snapshot.ingestion_records, record.clone(), |entry: &IngestionRecord| entry.id);
+        self.persist(snapshot).await
     }
 
     /// Persists an engram's relational metadata.
@@ -98,6 +168,35 @@ impl PostgresMemoryStore {
         self.persist(snapshot).await
     }
 
+    /// Returns all working contexts.
+    pub async fn list_working_contexts(&self) -> Result<Vec<WorkingContext>> {
+        Ok(self.snapshot().working_contexts)
+    }
+
+    /// Reads the persisted runtime configuration JSON, if present.
+    pub async fn get_config_profile(&self) -> Result<Option<serde_json::Value>> {
+        Ok(self.snapshot().config_profile)
+    }
+
+    /// Writes the active runtime configuration JSON.
+    pub async fn save_config_profile(
+        &self,
+        profile: serde_json::Value,
+        audit: ConfigAuditRecord,
+    ) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        snapshot.config_profile = Some(profile);
+        snapshot.config_audit.push(audit);
+        self.persist(snapshot).await
+    }
+
+    /// Returns config audit history ordered newest first.
+    pub async fn list_config_audit(&self) -> Result<Vec<ConfigAuditRecord>> {
+        let mut audit = self.snapshot().config_audit;
+        audit.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(audit)
+    }
+
     /// Returns the latest working context for a session, if any.
     pub async fn get_working_context(&self, session_id: Uuid) -> Result<Option<WorkingContext>> {
         Ok(self
@@ -118,8 +217,10 @@ impl PostgresMemoryStore {
             .map(|e| e.id)
             .collect();
         snapshot.sessions.retain(|s| s.id != session_id);
+        snapshot.episodes.retain(|e| e.session_id != session_id);
         snapshot.working_contexts.retain(|c| c.session_id != session_id);
         snapshot.engrams.retain(|e| e.session_ref != session_id);
+        snapshot.ingestion_records.retain(|r| r.session_id != session_id);
         snapshot.schemas.retain(|s| !s.source_engram_ids.iter().any(|eid| deleted_engram_ids.contains(eid)));
         self.persist(snapshot).await
     }

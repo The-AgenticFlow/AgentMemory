@@ -1,15 +1,72 @@
 //! HTTP server for the Engram runtime.
 
 pub mod routes;
+pub mod mcp;
 
-use axum::Router;
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::Response,
+    Router,
+};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::cors::{Any, CorsLayer};
 
 pub use routes::AppState;
 
 /// Builds the application router with all runtime endpoints.
 pub fn build_app(state: AppState) -> Router {
-    routes::router(state).fallback_service(
-        ServeDir::new("web").not_found_service(ServeFile::new("web/index.html")),
-    )
+    let web_root = if std::path::Path::new("web/dist/index.html").exists() {
+        "web/dist"
+    } else {
+        "web"
+    };
+    routes::router(state)
+        .fallback_service(
+            ServeDir::new(web_root).not_found_service(ServeFile::new(format!("{web_root}/index.html"))),
+        )
+        .layer(middleware::from_fn(api_token_auth))
+        .layer(cors_layer())
+}
+
+fn cors_layer() -> CorsLayer {
+    match std::env::var("ENGRAM_ALLOWED_ORIGINS") {
+        Ok(origins) if !origins.trim().is_empty() && origins.trim() != "*" => {
+            let origins = origins
+                .split(',')
+                .filter_map(|origin| origin.trim().parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>();
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+                .allow_headers(Any)
+                .allow_origin(origins)
+        }
+        _ => CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+            .allow_headers(Any)
+            .allow_origin(Any),
+    }
+}
+
+async fn api_token_auth(request: Request<Body>, next: Next) -> Result<Response, StatusCode> {
+    let Some(expected) = std::env::var("ENGRAM_API_TOKEN").ok().filter(|v| !v.is_empty()) else {
+        return Ok(next.run(request).await);
+    };
+    if request.uri().path() == "/health" {
+        return Ok(next.run(request).await);
+    }
+    let authorized = request
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|token| token == expected)
+        .unwrap_or(false);
+    if authorized {
+        Ok(next.run(request).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }

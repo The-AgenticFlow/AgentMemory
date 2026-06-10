@@ -6,10 +6,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put, delete};
 use axum::{Json, Router};
-use engram_core::{RetrievalState, Session, SessionMode, WorkingContext};
+use engram_core::{Episode, RetrievalState, Session, SessionMode, WorkingContext};
 use engram_qwen::chat::{ChatMessage, ChatRequest};
 use engram_runtime::{
-    ConstructiveKnowledge, IngestionOutcome, MemorySystem, RetrievalOutcome, SessionHandle,
+    ConstructiveKnowledge, IngestionOutcome, MemorySystem, RetrievalOutcome, RuntimeConfig,
+    SessionHandle,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,16 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/mcp", post(crate::mcp::mcp_http))
+        .route("/control/overview", get(control_overview))
+        .route("/control/graph", get(control_graph))
+        .route("/control/config", get(get_control_config).put(update_control_config))
+        .route("/control/config/reset", post(reset_control_config))
+        .route("/control/simulate/thalamus", post(simulate_thalamus))
+        .route("/memory/episodes", get(list_episodes))
+        .route("/memory/patterns", get(list_patterns))
+        .route("/memory/engrams", get(list_engrams))
+        .route("/memory/schemas", get(list_schemas))
         .route("/sessions", get(list_sessions).post(open_session))
         .route("/sessions/{id}", put(update_session).delete(close_session))
         .route("/sessions/{id}/delete", delete(delete_session))
@@ -88,6 +99,17 @@ pub struct EpisodeRequest {
 #[derive(Debug, Deserialize)]
 pub struct RetrievalRequest {
     pub query: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ThalamusSimRequest {
+    pub session_id: Option<Uuid>,
+    pub action: String,
+    pub context: String,
+    pub outcome: String,
+    pub expectation: Option<String>,
+    pub mode: Option<SessionMode>,
+    pub task_context: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +217,115 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         sessions,
         qwen_connected: state.system.qwen.is_some(),
     })
+}
+
+pub async fn control_overview(
+    State(state): State<AppState>,
+) -> ApiResult<Json<engram_runtime::RuntimeOverview>> {
+    Ok(Json(state.system.overview().await.map_err(internal_error)?))
+}
+
+pub async fn control_graph(
+    State(state): State<AppState>,
+) -> ApiResult<Json<engram_runtime::ControlGraph>> {
+    Ok(Json(state.system.control_graph().await.map_err(internal_error)?))
+}
+
+pub async fn get_control_config(State(state): State<AppState>) -> Json<RuntimeConfig> {
+    Json(state.system.runtime_config())
+}
+
+pub async fn update_control_config(
+    State(state): State<AppState>,
+    Json(config): Json<RuntimeConfig>,
+) -> ApiResult<Json<RuntimeConfig>> {
+    let config = state
+        .system
+        .update_config("dashboard", config)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(config))
+}
+
+pub async fn reset_control_config(State(state): State<AppState>) -> ApiResult<Json<RuntimeConfig>> {
+    let config = state
+        .system
+        .reset_config("dashboard")
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(config))
+}
+
+pub async fn simulate_thalamus(
+    State(state): State<AppState>,
+    Json(request): Json<ThalamusSimRequest>,
+) -> ApiResult<Json<engram_runtime::ThalamusSimulation>> {
+    let session = if let Some(session_id) = request.session_id {
+        load_handle(&state, session_id).await?.session
+    } else {
+        Session::new(
+            None,
+            request.expectation.unwrap_or_else(|| "preview expectation".to_string()),
+            request.mode.unwrap_or(SessionMode::Exploration),
+            request.task_context.unwrap_or_else(|| request.context.clone()),
+        )
+    };
+    let simulation = state
+        .system
+        .simulate_thalamus(&session, request.action, request.context, request.outcome)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(simulation))
+}
+
+pub async fn list_episodes(State(state): State<AppState>) -> ApiResult<Json<Vec<Episode>>> {
+    Ok(Json(
+        state
+            .system
+            .postgres
+            .list_episodes()
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+pub async fn list_patterns(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<engram_core::PatternEntry>>> {
+    Ok(Json(
+        state
+            .system
+            .qdrant
+            .list_patterns()
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+pub async fn list_engrams(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<engram_core::EngramEntry>>> {
+    Ok(Json(
+        state
+            .system
+            .qdrant
+            .list_engrams()
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+pub async fn list_schemas(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<engram_core::MetaEngram>>> {
+    Ok(Json(
+        state
+            .system
+            .postgres
+            .list_schemas()
+            .await
+            .map_err(internal_error)?,
+    ))
 }
 
 pub async fn list_sessions(State(state): State<AppState>) -> ApiResult<Json<Vec<SessionSummary>>> {

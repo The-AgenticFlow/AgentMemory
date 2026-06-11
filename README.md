@@ -72,7 +72,8 @@ The project uses a multi-stage Docker build orchestrated by `docker-compose.yml`
 |---|---|---|
 | **web-builder** (stage) | `node:22-bookworm` | Builds the React control panel into `web/dist`. |
 | **builder** (stage) | `rust:bookworm` | Compiles the Rust `engram-server` binary in release mode. Copies `Cargo.toml`, `Cargo.lock`, `crates/`, and the built dashboard into the image. |
-| **engram** (runtime) | `debian:bookworm-slim` | Runs the compiled `engram-server` binary and serves the built dashboard. Exposes port `3001` for the REST, dashboard, and MCP endpoints. Runs as non-root user `engram` (UID 10001). |
+| **engram** (runtime) | `debian:bookworm-slim` | Runs the compiled `engram-server` binary and serves the built dashboard. Exposes port `3001` for the REST, dashboard, and MCP HTTP endpoint. Runs as non-root user `engram` (UID 10001). |
+| **engram-mcp-stdio** (runtime) | `debian:bookworm-slim` | Runs the same server in MCP stdio mode for command-based clients launched through Docker Compose. |
 | **neo4j** | `neo4j:5.26-community` | Primary graph backend for sessions, episodes, patterns, engrams, schemas, and runtime config. |
 
 ### Volumes
@@ -119,10 +120,10 @@ The server exposes a REST + WebSocket API on port `3001`. Key endpoints:
 
 ## MCP Connection
 
-Agent Memory exposes MCP in two ways:
+When the stack is started with Docker Compose, Agent Memory exposes MCP in two ways:
 
-- HTTP at `POST http://127.0.0.1:3001/mcp` when running through Docker Compose
-- stdio by launching the server with `mcp-stdio`
+- HTTP through the `engram` service at `POST http://127.0.0.1:3001/mcp`
+- stdio through the `engram-mcp-stdio` service, launched with `docker compose run --rm --no-deps -T engram-mcp-stdio`
 
 Both transports expose the same JSON-RPC surface:
 
@@ -136,14 +137,16 @@ Both transports expose the same JSON-RPC surface:
 
 Available MCP tools:
 
-- `memory_open_session`
-- `memory_capture_episode`
-- `memory_retrieve`
-- `memory_consolidate`
-- `memory_get_working_context`
-- `memory_update_working_context`
-- `memory_get_config`
-- `memory_update_config`
+| Tool | Description |
+|---|---|
+| `open_reflection_session` | Prefrontal cortex control frame. Creates the session that carries the current goal, expectation, task context, and mode so later memory decisions share the same frame. |
+| `record_experience` | Episodic intake into the hippocampal/pre-engram path. Preserves action, context, and outcome so the system can decide whether the moment is worth learning from. |
+| `recall_relevant_memory` | Goal-directed recall into the prefrontal workspace. Reconstructs useful facts, inferences, and gaps from the Engram Dictionary instead of loading memory blindly. |
+| `consolidate_memory` | Sleep-like consolidation pass. Replays stored patterns, strengthens useful traces, lets weak noise decay, and compresses repeated experience into schema memory. |
+| `inspect_working_context` | Readout of active prefrontal working memory. Shows the transient task state currently being maintained before the agent chooses its next step. |
+| `refresh_working_context` | Top-down refocus of the prefrontal workspace. Starts or replaces the working context when attention or task identity shifts. |
+| `inspect_memory_policy` | Metacognitive policy readout. Exposes thresholds and weights that decide what counts as novel, salient, retrievable, or worth consolidating. |
+| `tune_memory_policy` | Metacognitive policy control. Adjusts thresholds and weights for selectivity, exploration, decay, retrieval breadth, and consolidation. |
 
 Available MCP resources:
 
@@ -153,7 +156,7 @@ Available MCP resources:
 - `engram://engrams/{id}`
 - `engram://schemas/{id}`
 
-### HTTP example
+### HTTP client
 
 Point an MCP client at:
 
@@ -161,14 +164,17 @@ Point an MCP client at:
 http://127.0.0.1:3001/mcp
 ```
 
-The Docker Compose setup enables the HTTP MCP endpoint by default with:
+For Docker Compose, that is the `engram` service on port `3001`.
 
-- `ENGRAM_MCP_HTTP_ENABLED=true`
-- `ENGRAM_MCP_STDIO_ENABLED=true`
+### Stdio client
 
-### Stdio example
+Launch the stdio transport from the repository root:
 
-Run the server in MCP stdio mode:
+```bash
+docker compose run --rm --no-deps -T engram-mcp-stdio
+```
+
+If you want to connect directly without Docker, run:
 
 ```bash
 cargo run -p engram-server -- mcp-stdio
@@ -180,17 +186,17 @@ If you already built the binary, the direct command is:
 engram-server mcp-stdio
 ```
 
-Example MCP client config:
+Example MCP client config for both transports:
 
 ```json
 {
   "mcpServers": {
-    "agent-memory": {
-      "command": "cargo",
-      "args": ["run", "-p", "engram-server", "--", "mcp-stdio"],
-      "env": {
-        "ENGRAM_DASHSCOPE_API_KEY": "your-key"
-      }
+    "agent-memory-http": {
+      "url": "http://127.0.0.1:3001/mcp"
+    },
+    "agent-memory-stdio": {
+      "command": "docker",
+      "args": ["compose", "run", "--rm", "--no-deps", "-T", "engram-mcp-stdio"]
     }
   }
 }

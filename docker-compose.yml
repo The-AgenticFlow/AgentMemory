@@ -1,25 +1,40 @@
+x-engram-common: &engram-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: engram-agent:latest
+  env_file:
+    - .env
+  environment: &engram-env
+    ENGRAM_DATA_DIR: /data
+    ENGRAM_NEO4J_URI: http://neo4j:7474
+    ENGRAM_NEO4J_USER: neo4j
+    ENGRAM_NEO4J_PASSWORD: engram-memory
+    ENGRAM_NEO4J_DATABASE: neo4j
+  volumes:
+    - engram-data:/data
+  restart: unless-stopped
+
 services:
   engram:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: engram-agent:latest
-    env_file:
-      - .env
+    <<: *engram-common
     environment:
+      <<: *engram-env
       ENGRAM_SERVER_ADDR: 0.0.0.0:3001
-      ENGRAM_DATA_DIR: /data
-      ENGRAM_NEO4J_URI: http://neo4j:7474
-      ENGRAM_NEO4J_USER: neo4j
-      ENGRAM_NEO4J_PASSWORD: engram-memory
-      ENGRAM_NEO4J_DATABASE: neo4j
       ENGRAM_MCP_HTTP_ENABLED: "true"
-      ENGRAM_MCP_STDIO_ENABLED: "true"
+      ENGRAM_MCP_STDIO_ENABLED: "false"
     ports:
       - "3001:3001"
-    volumes:
-      - engram-data:/data
-    restart: unless-stopped
+
+  engram-mcp-stdio:
+    <<: *engram-common
+    command: ["engram-server", "mcp-stdio"]
+    stdin_open: true
+    tty: false
+    environment:
+      <<: *engram-env
+      ENGRAM_MCP_HTTP_ENABLED: "false"
+      ENGRAM_MCP_STDIO_ENABLED: "true"
 
   neo4j:
     image: neo4j:5.26-community

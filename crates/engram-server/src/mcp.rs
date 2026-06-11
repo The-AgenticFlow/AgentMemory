@@ -87,7 +87,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
     let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
 
     let value = match name {
-        "memory_open_session" => {
+        "open_reflection_session" => {
             let expectation = string_arg(&args, "expectation", "remember useful context");
             let task_context = string_arg(&args, "task_context", "agent task");
             let mode = parse_mode(args.get("mode").and_then(Value::as_str).unwrap_or("Exploration"))?;
@@ -99,7 +99,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(handle.session.id, handle.clone());
             serde_json::to_value(handle).map_err(internal)?
         }
-        "memory_capture_episode" => {
+        "record_experience" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let mut handle = load_handle(state, session_id).await?;
             let outcome = state
@@ -115,7 +115,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(outcome).map_err(internal)?
         }
-        "memory_retrieve" => {
+        "recall_relevant_memory" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let handle = load_handle(state, session_id).await?;
             let retrieval: RetrievalOutcome = state
@@ -126,16 +126,16 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(retrieval).map_err(internal)?
         }
-        "memory_consolidate" => {
+        "consolidate_memory" => {
             let schemas = state.system.consolidate().await.map_err(internal)?;
             json!({ "created_schemas": schemas.len(), "schemas": schemas })
         }
-        "memory_get_working_context" => {
+        "inspect_working_context" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let handle = load_handle(state, session_id).await?;
             serde_json::to_value(handle.working_context).map_err(internal)?
         }
-        "memory_update_working_context" => {
+        "refresh_working_context" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let mut handle = load_handle(state, session_id).await?;
             let task_id = string_arg(&args, "task_id", "mcp-task");
@@ -148,8 +148,10 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(context).map_err(internal)?
         }
-        "memory_get_config" => serde_json::to_value(state.system.runtime_config()).map_err(internal)?,
-        "memory_update_config" => {
+        "inspect_memory_policy" => {
+            serde_json::to_value(state.system.runtime_config()).map_err(internal)?
+        }
+        "tune_memory_policy" => {
             let config: RuntimeConfig = serde_json::from_value(args).map_err(internal)?;
             let config = state
                 .system
@@ -235,14 +237,38 @@ async fn get_prompt(params: Value) -> Result<Value, (i64, String)> {
 
 fn tools() -> Vec<Value> {
     [
-        ("memory_open_session", "Open a memory session"),
-        ("memory_capture_episode", "Capture one action/context/outcome episode"),
-        ("memory_retrieve", "Retrieve structured memories for a query"),
-        ("memory_consolidate", "Run consolidation and schema generation"),
-        ("memory_get_working_context", "Read the active working context"),
-        ("memory_update_working_context", "Open/update a working context"),
-        ("memory_get_config", "Read runtime behavior config"),
-        ("memory_update_config", "Update runtime behavior config"),
+        (
+            "open_reflection_session",
+            "Prefrontal cortex control frame. This sits at the start of an interaction and creates the session that carries the current goal, expectation, task context, and mode; every later memory decision is judged against this frame.",
+        ),
+        (
+            "record_experience",
+            "Episodic intake into the hippocampal/pre-engram path. This sits after an action or observation and preserves action, context, and outcome so the thalamus filter can decide whether the moment is worth learning from.",
+        ),
+        (
+            "recall_relevant_memory",
+            "Goal-directed recall into the prefrontal workspace. This sits between the active task and the Engram Dictionary, using the query and session frame to reconstruct useful facts, inferences, and gaps instead of loading memory blindly.",
+        ),
+        (
+            "consolidate_memory",
+            "Sleep-like consolidation pass. This sits outside the immediate task loop and replays stored patterns, strengthens useful traces, lets weak noise decay, and compresses repeated experience into schema memory.",
+        ),
+        (
+            "inspect_working_context",
+            "Readout of active prefrontal working memory. It shows the transient task state currently being maintained so the agent can see which episodes, active engrams, inferences, and task frame are shaping its next step.",
+        ),
+        (
+            "refresh_working_context",
+            "Top-down refocus of the prefrontal workspace. This starts or replaces the working context for a task when attention or task identity shifts, giving future recall and episode intake a fresh task frame.",
+        ),
+        (
+            "inspect_memory_policy",
+            "Metacognitive policy readout. This sits above intake, retrieval, and consolidation and exposes the thresholds and weights that decide what counts as novel, salient, retrievable, or worth consolidating.",
+        ),
+        (
+            "tune_memory_policy",
+            "Metacognitive policy control. This adjusts the thresholds and weights that steer selectivity, exploration, decay, retrieval breadth, and consolidation so memory behavior matches the task's risk and learning needs.",
+        ),
     ]
     .into_iter()
     .map(|(name, description)| json!({ "name": name, "description": description, "inputSchema": { "type": "object" } }))

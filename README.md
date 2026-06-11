@@ -4,8 +4,10 @@ A neuroscience-inspired memory architecture for AI agents, built in Rust.
 
 ## Overview
 
+<<<<<<< HEAD
 Artificial Engram implements an **Engram-Based Memory System** — a biologically grounded architecture that enables AI agents to learn from experience, recognize patterns, abstract knowledge, and actively forget what is irrelevant. Instead of treating every interaction as new, the agent builds persistent memory structures that evolve over time.
-<img width="960" height="540" alt="image" src="https://github.com/user-attachments/assets/aec828e6-07d4-4bf1-8bcc-5e83e81ff97b" />
+
+<img width="1331" height="1181" alt="image" src="https://github.com/user-attachments/assets/c99c4e5c-a664-4930-a8b4-4d5e9116026f" />
 ## Core Concepts
 
 The system follows one guiding principle: **What would the brain do?**

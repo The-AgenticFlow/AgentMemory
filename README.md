@@ -4,10 +4,10 @@ A neuroscience-inspired memory architecture for AI agents, built in Rust.
 
 ## Overview
 
-<<<<<<< HEAD
-Artificial Engram implements an **Engram-Based Memory System** — a biologically grounded architecture that enables AI agents to learn from experience, recognize patterns, abstract knowledge, and actively forget what is irrelevant. Instead of treating every interaction as new, the agent builds persistent memory structures that evolve over time.
+Artificial Engram implements an **Engram-Based Memory System** - a biologically grounded architecture that enables AI agents to learn from experience, recognize patterns, abstract knowledge, and actively forget what is irrelevant. Instead of treating every interaction as new, the agent builds persistent memory structures that evolve over time.
 
 <img width="1331" height="1181" alt="image" src="https://github.com/user-attachments/assets/c99c4e5c-a664-4930-a8b4-4d5e9116026f" />
+
 ## Core Concepts
 
 The system follows one guiding principle: **What would the brain do?**
@@ -117,7 +117,84 @@ The server exposes a REST + WebSocket API on port `3001`. Key endpoints:
 - `GET /memory/episodes`, `GET /memory/patterns`, `GET /memory/engrams`, `GET /memory/schemas` — Memory inspection APIs
 - `POST /mcp` — MCP HTTP endpoint
 
-Run `engram-server mcp-stdio` for stdio-based MCP clients.
+## MCP Connection
+
+Agent Memory exposes MCP in two ways:
+
+- HTTP at `POST http://127.0.0.1:3001/mcp` when running through Docker Compose
+- stdio by launching the server with `mcp-stdio`
+
+Both transports expose the same JSON-RPC surface:
+
+- `initialize`
+- `tools/list`
+- `tools/call`
+- `resources/list`
+- `resources/read`
+- `prompts/list`
+- `prompts/get`
+
+Available MCP tools:
+
+- `memory_open_session`
+- `memory_capture_episode`
+- `memory_retrieve`
+- `memory_consolidate`
+- `memory_get_working_context`
+- `memory_update_working_context`
+- `memory_get_config`
+- `memory_update_config`
+
+Available MCP resources:
+
+- `engram://overview`
+- `engram://graph`
+- `engram://sessions/{id}`
+- `engram://engrams/{id}`
+- `engram://schemas/{id}`
+
+### HTTP example
+
+Point an MCP client at:
+
+```text
+http://127.0.0.1:3001/mcp
+```
+
+The Docker Compose setup enables the HTTP MCP endpoint by default with:
+
+- `ENGRAM_MCP_HTTP_ENABLED=true`
+- `ENGRAM_MCP_STDIO_ENABLED=true`
+
+### Stdio example
+
+Run the server in MCP stdio mode:
+
+```bash
+cargo run -p engram-server -- mcp-stdio
+```
+
+If you already built the binary, the direct command is:
+
+```bash
+engram-server mcp-stdio
+```
+
+Example MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "cargo",
+      "args": ["run", "-p", "engram-server", "--", "mcp-stdio"],
+      "env": {
+        "ENGRAM_DASHSCOPE_API_KEY": "your-key"
+      }
+    }
+  }
+}
+```
 
 See `WEB_UI_API_CONTRACT.md` for the full API specification.
 

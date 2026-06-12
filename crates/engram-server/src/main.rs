@@ -61,6 +61,19 @@ async fn app_state_from_env() -> anyhow::Result<AppState> {
         }
     }
 
-    state.system.initialize().await?;
+    // Retry initialization with exponential backoff so the server survives
+    // transient Neo4j unavailability during container startup.
+    let mut backoff = std::time::Duration::from_millis(500);
+    let max_backoff = std::time::Duration::from_secs(30);
+    loop {
+        match state.system.initialize().await {
+            Ok(()) => break,
+            Err(err) => {
+                tracing::warn!("Initialization failed (will retry): {err}");
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+            }
+        }
+    }
     Ok(state)
 }

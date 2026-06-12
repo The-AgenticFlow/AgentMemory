@@ -289,23 +289,51 @@ impl Neo4jMemoryStore {
             }]
         });
 
-        let response = self
-            .client
-            .post(config.tx_url())
-            .basic_auth(&config.user, Some(&config.password))
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("connecting to Neo4j at {}", config.uri))?
-            .error_for_status()
-            .context("Neo4j transaction failed")?;
+        let mut backoff = std::time::Duration::from_millis(200);
+        let max_backoff = std::time::Duration::from_secs(10);
+        let max_retries: u32 = 5;
 
-        let payload: Neo4jResponse = response.json().await.context("parsing Neo4j response")?;
-        if payload.errors.is_empty() {
-            Ok(())
-        } else {
-            anyhow::bail!("Neo4j errors: {:?}", payload.errors)
+        for attempt in 0..=max_retries {
+            match self
+                .client
+                .post(config.tx_url())
+                .basic_auth(&config.user, Some(&config.password))
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let payload: Neo4jResponse = response.json().await.context("parsing Neo4j response")?;
+                    if payload.errors.is_empty() {
+                        return Ok(());
+                    }
+                    // Neo4j returned application-level errors — these are not transient.
+                    anyhow::bail!("Neo4j errors: {:?}", payload.errors);
+                }
+                Err(err) => {
+                    // Only retry on connection-level errors (connection refused, timeout, etc.)
+                    if attempt < max_retries && Self::is_transient(&err) {
+                        tracing::warn!(
+                            "Neo4j request failed (attempt {}/{max_retries}): {err}; retrying in {:?}",
+                            attempt + 1,
+                            backoff,
+                        );
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(max_backoff);
+                        continue;
+                    }
+                    return Err(err).with_context(|| format!("connecting to Neo4j at {}", config.uri));
+                }
+            }
         }
+
+        unreachable!()
+    }
+
+    /// Returns true for network-level errors that are likely transient
+    /// (connection refused, timeouts, DNS failures, etc.)
+    fn is_transient(err: &reqwest::Error) -> bool {
+        err.is_connect() || err.is_timeout()
     }
 }
 

@@ -143,18 +143,30 @@ impl MemorySystem {
     /// Loads persisted runtime config and initializes the graph backend.
     pub async fn initialize(&self) -> Result<()> {
         self.neo4j.initialize().await?;
-        if let Some(value) = self.postgres.get_config_profile().await? {
+        let config = if let Some(value) = self.postgres.get_config_profile().await? {
             match serde_json::from_value::<RuntimeConfig>(value) {
                 Ok(config) if config.validate().is_ok() => {
-                    *self.config.write().expect("RuntimeConfig lock poisoned") = config;
+                    config
                 }
                 _ => {
                     tracing::warn!("stored runtime config is invalid; keeping defaults");
+                    RuntimeConfig::default()
                 }
             }
         } else {
-            self.persist_config("system", RuntimeConfig::default()).await?;
+            RuntimeConfig::default()
+        };
+        *self.config.write().expect("RuntimeConfig lock poisoned") = config.clone();
+        self.persist_config("system", config).await?;
+
+        // Create default shared bank if none exists
+        let banks = self.postgres.list_banks().await?;
+        if banks.is_empty() {
+            let default_bank = engram_core::MemoryBank::default_shared();
+            self.postgres.save_bank(&default_bank).await?;
+            tracing::info!("Created default shared memory bank: {}", default_bank.id);
         }
+
         Ok(())
     }
 
@@ -201,11 +213,19 @@ impl MemorySystem {
     pub async fn open_session(
         &self,
         user_id: Option<uuid::Uuid>,
+        bank_id: Option<uuid::Uuid>,
         expectation: impl Into<String>,
         mode: SessionMode,
         task_context: impl Into<String>,
     ) -> Result<SessionHandle> {
-        let session = Session::new(user_id, expectation, mode, task_context);
+        let bank_id = match bank_id {
+            Some(id) => Some(id),
+            None => {
+                let banks = self.postgres.list_banks().await.unwrap_or_default();
+                banks.iter().find(|b| b.bank_type == engram_core::BankType::Shared).map(|b| b.id)
+            }
+        };
+        let session = Session::new(user_id, bank_id, expectation, mode, task_context);
         self.postgres.save_session(&session).await?;
         if let Err(error) = self.neo4j.upsert_session(&session).await {
             tracing::warn!("Neo4j session sync failed: {error}");
@@ -265,7 +285,9 @@ impl MemorySystem {
         context: impl Into<String>,
         outcome: impl Into<String>,
     ) -> Result<IngestionOutcome> {
-        let episode = Episode::new(action, context, outcome, handle.session.id);
+        let episode = Episode::with_bank(
+            action, context, outcome, handle.session.id, handle.session.bank_id,
+        );
         let config = self.runtime_config();
         let scores = self
             .thalamus
@@ -302,6 +324,7 @@ impl MemorySystem {
             )
         };
 
+        let plasticity = self.plasticity.with_config(&config.plasticity);
         let pattern = self
             .buffer
             .with_config(&config.buffer)
@@ -310,12 +333,13 @@ impl MemorySystem {
                 &scores,
                 &handle.session,
                 &self.qdrant,
-                &self.plasticity,
+                &plasticity,
                 &self.stc,
             )
             .await?;
         let decision = self
             .pattern
+            .with_config(&config.pattern)
             .separate_or_complete(
                 &pattern,
                 &handle.session,
@@ -396,6 +420,7 @@ impl MemorySystem {
         };
         let outcome = self
             .retrieval
+            .clone()
             .with_config(&self.runtime_config().retrieval)
             .retrieve(
                 query.into(),
@@ -435,7 +460,7 @@ impl MemorySystem {
         context: impl Into<String>,
         outcome: impl Into<String>,
     ) -> Result<ThalamusSimulation> {
-        let episode = Episode::new(action, context, outcome, session.id);
+        let episode = Episode::with_bank(action, context, outcome, session.id, session.bank_id);
         let assessment = self
             .thalamus
             .score_episode_with_config(

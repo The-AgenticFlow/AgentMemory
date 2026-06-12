@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use engram_core::{EngramEntry, Episode, MetaEngram, Session, WorkingContext};
+use engram_core::{BankType, EngramEntry, Episode, MemoryBank, MetaEngram, Session, WorkingContext, WorkingMemoryEntry};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -31,6 +31,10 @@ struct PostgresSnapshot {
     config_profile: Option<serde_json::Value>,
     #[serde(default)]
     config_audit: Vec<ConfigAuditRecord>,
+    #[serde(default)]
+    memory_banks: Vec<MemoryBank>,
+    #[serde(default)]
+    working_memory: Vec<WorkingMemoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +227,135 @@ impl PostgresMemoryStore {
         snapshot.ingestion_records.retain(|r| r.session_id != session_id);
         snapshot.schemas.retain(|s| !s.source_engram_ids.iter().any(|eid| deleted_engram_ids.contains(eid)));
         self.persist(snapshot).await
+    }
+
+    // ── Memory Bank CRUD ────────────────────────────────────────
+
+    pub async fn save_bank(&self, bank: &MemoryBank) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        upsert_by_id(&mut snapshot.memory_banks, bank.clone(), |entry: &MemoryBank| entry.id);
+        self.persist(snapshot).await
+    }
+
+    pub async fn get_bank(&self, id: Uuid) -> Result<Option<MemoryBank>> {
+        Ok(self.snapshot().memory_banks.into_iter().find(|b| b.id == id))
+    }
+
+    pub async fn list_banks(&self) -> Result<Vec<MemoryBank>> {
+        let mut banks = self.snapshot().memory_banks;
+        banks.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        Ok(banks)
+    }
+
+    pub async fn list_banks_by_type(&self, bank_type: BankType) -> Result<Vec<MemoryBank>> {
+        Ok(self
+            .snapshot()
+            .memory_banks
+            .into_iter()
+            .filter(|b| b.bank_type == bank_type)
+            .collect())
+    }
+
+    pub async fn delete_bank(&self, bank_id: Uuid) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        let child_ids: Vec<Uuid> = snapshot
+            .memory_banks
+            .iter()
+            .filter(|b| b.parent_bank_id == Some(bank_id))
+            .map(|b| b.id)
+            .collect();
+        snapshot.memory_banks.retain(|b| b.id != bank_id);
+        snapshot.memory_banks.retain(|b| !child_ids.contains(&b.id));
+        snapshot.sessions.retain(|s| s.bank_id != Some(bank_id));
+        for child in &child_ids {
+            snapshot.sessions.retain(|s| s.bank_id != Some(*child));
+        }
+        snapshot.episodes.retain(|e| e.bank_id != Some(bank_id));
+        for child in &child_ids {
+            snapshot.episodes.retain(|e| e.bank_id != Some(*child));
+        }
+        snapshot.engrams.retain(|e| e.bank_id != Some(bank_id));
+        for child in &child_ids {
+            snapshot.engrams.retain(|e| e.bank_id != Some(*child));
+        }
+        snapshot.schemas.retain(|s| s.bank_id != Some(bank_id));
+        for child in &child_ids {
+            snapshot.schemas.retain(|s| s.bank_id != Some(*child));
+        }
+        self.persist(snapshot).await
+    }
+
+    pub async fn list_sessions_by_bank(&self, bank_id: Uuid) -> Result<Vec<Session>> {
+        Ok(self
+            .snapshot()
+            .sessions
+            .into_iter()
+            .filter(|s| s.bank_id == Some(bank_id))
+            .collect())
+    }
+
+    pub async fn list_engrams_by_bank(&self, bank_id: Uuid) -> Result<Vec<EngramEntry>> {
+        Ok(self
+            .snapshot()
+            .engrams
+            .into_iter()
+            .filter(|e| e.bank_id == Some(bank_id))
+            .collect())
+    }
+
+    pub async fn list_schemas_by_bank(&self, bank_id: Uuid) -> Result<Vec<MetaEngram>> {
+        Ok(self
+            .snapshot()
+            .schemas
+            .into_iter()
+            .filter(|s| s.bank_id == Some(bank_id))
+            .collect())
+    }
+
+    // ── Working Memory ──────────────────────────────────────────
+
+    pub async fn save_working_memory(&self, entry: &WorkingMemoryEntry) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        upsert_by_id(
+            &mut snapshot.working_memory,
+            entry.clone(),
+            |e: &WorkingMemoryEntry| e.id,
+        );
+        self.persist(snapshot).await
+    }
+
+    pub async fn list_working_memory(&self) -> Result<Vec<WorkingMemoryEntry>> {
+        let mut entries = self.snapshot().working_memory;
+        entries.sort_by(|left, right| right.strength.total_cmp(&left.strength));
+        Ok(entries)
+    }
+
+    pub async fn list_working_memory_by_session(&self, session_id: Uuid) -> Result<Vec<WorkingMemoryEntry>> {
+        Ok(self
+            .snapshot()
+            .working_memory
+            .into_iter()
+            .filter(|e| e.session_id == session_id)
+            .collect())
+    }
+
+    pub async fn delete_working_memory(&self, entry_id: Uuid) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        snapshot.working_memory.retain(|e| e.id != entry_id);
+        self.persist(snapshot).await
+    }
+
+    pub async fn expire_working_memory(&self, min_strength: f32) -> Result<Vec<WorkingMemoryEntry>> {
+        let mut snapshot = self.snapshot();
+        let expired: Vec<WorkingMemoryEntry> = snapshot
+            .working_memory
+            .iter()
+            .filter(|e| e.should_expire(min_strength))
+            .cloned()
+            .collect();
+        snapshot.working_memory.retain(|e| !e.should_expire(min_strength));
+        self.persist(snapshot).await?;
+        Ok(expired)
     }
 
     fn snapshot(&self) -> PostgresSnapshot {

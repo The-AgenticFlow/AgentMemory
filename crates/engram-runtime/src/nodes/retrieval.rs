@@ -3,6 +3,8 @@
 //! This node activates schemas, searches engrams, spreads activation
 //! through kinship links, and assembles a transparent knowledge payload.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use engram_core::{MetaEngram, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
@@ -14,21 +16,57 @@ use crate::nodes::schema::SchemaActivationNode;
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
 
 /// Top-level retrieval node that performs schema-guided search.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RetrievalArchitectureNode {
     /// Base number of candidates to return.
     pub top_k: usize,
+    /// Spread factors per retrieval mode.
+    pub spread_factors: HashMap<String, f32>,
+    /// Mode-specific bonuses for similarity adjustment.
+    pub mode_bonuses: HashMap<String, f32>,
+    /// Weight for keyword-tag overlap boost.
+    pub keyword_tag_weight: f32,
+    /// Weight for keyword-content overlap boost.
+    pub keyword_content_weight: f32,
+    /// Weight for schema prediction match bonus.
+    pub schema_bonus_weight: f32,
+    /// Maximum content length to include in facts.
+    pub max_content_length: usize,
 }
 
 impl Default for RetrievalArchitectureNode {
     fn default() -> Self {
-        Self { top_k: 5 }
+        Self {
+            top_k: 5,
+            spread_factors: HashMap::from([
+                ("precision".to_string(), 0.45),
+                ("exploration".to_string(), 0.60),
+                ("analogy".to_string(), 0.55),
+                ("validation".to_string(), 0.40),
+            ]),
+            mode_bonuses: HashMap::from([
+                ("precision".to_string(), 0.05),
+                ("exploration".to_string(), 0.00),
+                ("analogy".to_string(), 0.03),
+                ("validation".to_string(), -0.02),
+            ]),
+            keyword_tag_weight: 0.08,
+            keyword_content_weight: 0.05,
+            schema_bonus_weight: 0.04,
+            max_content_length: 300,
+        }
     }
 }
 
 impl RetrievalArchitectureNode {
     pub fn with_config(mut self, config: &RetrievalConfig) -> Self {
         self.top_k = config.top_k;
+        self.spread_factors = config.spread_factors.clone();
+        self.mode_bonuses = config.mode_bonuses.clone();
+        self.keyword_tag_weight = config.keyword_tag_weight;
+        self.keyword_content_weight = config.keyword_content_weight;
+        self.schema_bonus_weight = config.schema_bonus_weight;
+        self.max_content_length = config.max_content_length;
         self
     }
 
@@ -64,7 +102,7 @@ impl RetrievalArchitectureNode {
                 let tags = candidate.item.tags.clone();
                 let engram = candidate.item;
                 RetrievalCandidate {
-                    similarity: adjust_similarity(
+                    similarity: self.adjust_similarity(
                         candidate.similarity,
                         &query,
                         &tags,
@@ -80,9 +118,9 @@ impl RetrievalArchitectureNode {
         for candidate in &candidates {
             if let Some(kinship_ref) = candidate.engram.kinship_ref {
                 if let Some(kinship) = qdrant.get_engram(kinship_ref).await? {
-                    let similarity = adjust_similarity(
-                        cosine_similarity(&kinship.embedding, &query_embedding)
-                            * spread_factor(retrieval_mode),
+                    let spread = self.spread_factor(retrieval_mode);
+                    let similarity = self.adjust_similarity(
+                        cosine_similarity(&kinship.embedding, &query_embedding) * spread,
                         &query,
                         &kinship.tags,
                         schema.as_ref(),
@@ -106,7 +144,7 @@ impl RetrievalArchitectureNode {
             postgres.save_engram(&candidate.engram).await?;
         }
 
-        let knowledge = constructive_assembly(
+        let knowledge = self.constructive_assembly(
             &query,
             session,
             schema.as_ref(),
@@ -121,71 +159,145 @@ impl RetrievalArchitectureNode {
             knowledge,
         })
     }
-}
 
-/// Adjusts retrieval behavior based on the active mode.
-fn spread_factor(mode: engram_core::RetrievalState) -> f32 {
-    match mode {
-        engram_core::RetrievalState::PrecisionMode => 0.45,
-        engram_core::RetrievalState::ExplorationMode => 0.60,
-        engram_core::RetrievalState::AnalogyMode => 0.55,
-        engram_core::RetrievalState::ValidationMode => 0.40,
-        engram_core::RetrievalState::Default => 0.50,
+    /// Adjusts retrieval behavior based on the active mode.
+    fn spread_factor(&self, mode: engram_core::RetrievalState) -> f32 {
+        let key = match mode {
+            engram_core::RetrievalState::PrecisionMode => "precision",
+            engram_core::RetrievalState::ExplorationMode => "exploration",
+            engram_core::RetrievalState::AnalogyMode => "analogy",
+            engram_core::RetrievalState::ValidationMode => "validation",
+            engram_core::RetrievalState::Default => "default",
+        };
+        self.spread_factors.get(key).copied().unwrap_or(0.50)
     }
-}
 
-/// Applies query, schema, and mode bonuses to raw similarity.
-fn adjust_similarity(
-    similarity: f32,
-    query: &str,
-    tags: &[String],
-    schema: Option<&MetaEngram>,
-    mode: engram_core::RetrievalState,
-) -> f32 {
-    let query_lower = query.to_lowercase();
-    let query_terms: Vec<&str> = query_lower
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|t| t.len() > 2)
-        .collect();
-    
-    // Keyword overlap: count how many query terms appear in tags or engram content
-    let tag_overlap = tags
-        .iter()
-        .filter(|tag| {
-            let tag_lower = tag.to_lowercase();
-            query_terms.iter().any(|term| tag_lower.contains(term))
-        })
-        .count() as f32;
-    
-    // Content-level keyword boost (if engram has readable content)
-    let content_overlap = tags
-        .iter()
-        .filter(|tag| {
-            let tag_lower = tag.to_lowercase();
-            query_terms.iter().any(|term| content_contains_word(&tag_lower, term))
-        })
-        .count() as f32;
-    
-    let schema_bonus = schema
-        .map(|schema| {
-            schema
-                .prediction_fields
-                .iter()
-                .filter(|field| query_lower.contains(&field.to_lowercase()))
-                .count() as f32
-        })
-        .unwrap_or(0.0);
-    let mode_bonus = match mode {
-        engram_core::RetrievalState::PrecisionMode => 0.05,
-        engram_core::RetrievalState::ExplorationMode => 0.00,
-        engram_core::RetrievalState::AnalogyMode => 0.03,
-        engram_core::RetrievalState::ValidationMode => -0.02,
-        engram_core::RetrievalState::Default => 0.0,
-    };
+    /// Applies query, schema, and mode bonuses to raw similarity.
+    fn adjust_similarity(
+        &self,
+        similarity: f32,
+        query: &str,
+        tags: &[String],
+        schema: Option<&MetaEngram>,
+        mode: engram_core::RetrievalState,
+    ) -> f32 {
+        let query_lower = query.to_lowercase();
+        let query_terms: Vec<&str> = query_lower
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|t| t.len() > 2)
+            .collect();
 
-    // Stronger keyword overlap boost: 0.08 per matching tag, 0.05 per content word
-    let keyword_boost = (tag_overlap * 0.08) + (content_overlap * 0.05);
-    (similarity + keyword_boost + schema_bonus * 0.04 + mode_bonus).clamp(0.0, 1.0)
+        let tag_overlap = tags
+            .iter()
+            .filter(|tag| {
+                let tag_lower = tag.to_lowercase();
+                query_terms.iter().any(|term| tag_lower.contains(term))
+            })
+            .count() as f32;
+
+        let content_overlap = tags
+            .iter()
+            .filter(|tag| {
+                let tag_lower = tag.to_lowercase();
+                query_terms.iter().any(|term| content_contains_word(&tag_lower, term))
+            })
+            .count() as f32;
+
+        let schema_bonus = schema
+            .map(|schema| {
+                schema
+                    .prediction_fields
+                    .iter()
+                    .filter(|field| query_lower.contains(&field.to_lowercase()))
+                    .count() as f32
+            })
+            .unwrap_or(0.0);
+
+        let mode_key = match mode {
+            engram_core::RetrievalState::PrecisionMode => "precision",
+            engram_core::RetrievalState::ExplorationMode => "exploration",
+            engram_core::RetrievalState::AnalogyMode => "analogy",
+            engram_core::RetrievalState::ValidationMode => "validation",
+            engram_core::RetrievalState::Default => "default",
+        };
+        let mode_bonus = self.mode_bonuses.get(mode_key).copied().unwrap_or(0.0);
+
+        let keyword_boost =
+            (tag_overlap * self.keyword_tag_weight) + (content_overlap * self.keyword_content_weight);
+        (similarity + keyword_boost + schema_bonus * self.schema_bonus_weight + mode_bonus).clamp(0.0, 1.0)
+    }
+
+    /// Builds the final transparent knowledge payload from actual memory content.
+    fn constructive_assembly(
+        &self,
+        query: &str,
+        _session: &Session,
+        schema: Option<&MetaEngram>,
+        schema_prediction: &str,
+        candidates: &[RetrievalCandidate],
+    ) -> ConstructiveKnowledge {
+        let mut facts = Vec::new();
+        let mut inferences = Vec::new();
+        let mut gaps = Vec::new();
+
+        for (index, candidate) in candidates.iter().enumerate() {
+            if let Some(content) = &candidate.engram.episodic_content_ref {
+                let truncated = if content.len() > self.max_content_length {
+                    format!("{}...", &content[..self.max_content_length])
+                } else {
+                    content.clone()
+                };
+                facts.push(format!("[{}] {}", index + 1, truncated));
+            }
+        }
+
+        if let Some(schema) = schema {
+            inferences.push(format!(
+                "Schema matched: {} (predicts: {})",
+                schema.id, schema_prediction
+            ));
+            if schema.tags.len() >= 3 {
+                inferences.push(format!(
+                    "Related concepts from long-term memory: {}",
+                    schema.tags[..3.min(schema.tags.len())].join(", ")
+                ));
+            }
+        }
+
+        if candidates.is_empty() {
+            gaps.push("No relevant memories found for this query.".to_string());
+        } else if facts.is_empty() {
+            gaps.push("Engrams matched but contain no readable content.".to_string());
+        } else {
+            let content_combined = facts.join(" ").to_lowercase();
+            let query_lower = query.to_lowercase();
+            if query_lower.starts_with("what")
+                || query_lower.starts_with("who")
+                || query_lower.starts_with("where")
+            {
+                let key_terms: Vec<&str> = query_lower
+                    .split(|c: char| !c.is_ascii_alphanumeric())
+                    .filter(|t| t.len() > 4)
+                    .collect();
+                let matched = key_terms
+                    .iter()
+                    .filter(|t| content_combined.contains(*t))
+                    .count();
+                if matched < key_terms.len().saturating_sub(1) {
+                    gaps.push(
+                        "Retrieved memories may not fully answer this specific question."
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        ConstructiveKnowledge {
+            facts,
+            inferences,
+            gaps,
+        }
+    }
 }
 
 /// Checks if text contains a word boundary match for the term.
@@ -203,71 +315,5 @@ fn schema_prediction_summary(schema: &MetaEngram) -> String {
         "schema with no explicit predictions".to_string()
     } else {
         format!("schema predicts {}", schema.prediction_fields.join(", "))
-    }
-}
-
-/// Builds the final transparent knowledge payload from actual memory content.
-fn constructive_assembly(
-    query: &str,
-    _session: &Session,
-    schema: Option<&MetaEngram>,
-    schema_prediction: &str,
-    candidates: &[RetrievalCandidate],
-) -> ConstructiveKnowledge {
-    let mut facts = Vec::new();
-    let mut inferences = Vec::new();
-    let mut gaps = Vec::new();
-
-    // Use actual episodic content as facts, not metadata
-    for (index, candidate) in candidates.iter().enumerate() {
-        if let Some(content) = &candidate.engram.episodic_content_ref {
-            // Truncate very long content for the prompt
-            let content = if content.len() > 300 {
-                format!("{}...", &content[..300])
-            } else {
-                content.clone()
-            };
-            facts.push(format!("[{}] {}", index + 1, content));
-        }
-    }
-
-    if let Some(schema) = schema {
-        inferences.push(format!(
-            "Schema matched: {} (predicts: {})",
-            schema.id, schema_prediction
-        ));
-        if schema.tags.len() >= 3 {
-            inferences.push(format!(
-                "Related concepts from long-term memory: {}",
-                schema.tags[..3.min(schema.tags.len())].join(", ")
-            ));
-        }
-    }
-
-    if candidates.is_empty() {
-        gaps.push("No relevant memories found for this query.".to_string());
-    } else if facts.is_empty() {
-        gaps.push("Engrams matched but contain no readable content.".to_string());
-    } else {
-        // Only flag a gap if the query asks for something not clearly present
-        let content_combined = facts.join(" ").to_lowercase();
-        let query_lower = query.to_lowercase();
-        // Simple heuristic: if query is a question and content doesn't seem to answer it
-        if query_lower.starts_with("what") || query_lower.starts_with("who") || query_lower.starts_with("where") {
-            let key_terms: Vec<&str> = query_lower
-                .split(|c: char| !c.is_ascii_alphanumeric())
-                .filter(|t| t.len() > 4)
-                .collect();
-            let matched = key_terms.iter().filter(|t| content_combined.contains(*t)).count();
-            if matched < key_terms.len().saturating_sub(1) {
-                gaps.push("Retrieved memories may not fully answer this specific question.".to_string());
-            }
-        }
-    }
-
-    ConstructiveKnowledge {
-        facts,
-        inferences,
-        gaps,
     }
 }

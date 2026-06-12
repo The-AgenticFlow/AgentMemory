@@ -6,7 +6,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put, delete};
 use axum::{Json, Router};
-use engram_core::{Episode, RetrievalState, Session, SessionMode, WorkingContext};
+use engram_core::{BankType, DispositionConfig, Episode, MemoryBank, RetrievalState, Session, SessionMode, WorkingContext};
 use engram_qwen::chat::{ChatMessage, ChatRequest};
 use engram_runtime::{
     ConstructiveKnowledge, IngestionOutcome, MemorySystem, RetrievalOutcome, RuntimeConfig,
@@ -66,6 +66,17 @@ pub fn router(state: AppState) -> Router {
         .route("/sessions/{id}/chat", post(chat))
         .route("/sessions/{id}/ws", get(chat_ws))
         .route("/consolidate", post(consolidate))
+        .route("/banks", get(list_banks).post(create_bank))
+        .route("/banks/{id}", get(get_bank).put(update_bank).delete(delete_bank))
+        .route("/banks/{id}/sessions", get(list_bank_sessions))
+        .route("/banks/{id}/engrams", get(list_bank_engrams))
+        .route("/banks/{id}/schemas", get(list_bank_schemas))
+        .route("/working-memory", get(list_working_memory))
+        .route("/sessions/{id}/working-memory", post(add_working_memory).get(list_session_working_memory))
+        .route("/sessions/{id}/working-memory/{entry_id}", delete(delete_working_memory))
+        .route("/sessions/{id}/retain", post(process_episode))
+        .route("/sessions/{id}/recall", post(retrieve))
+        .route("/reflect", post(consolidate))
         .with_state(state)
 }
 
@@ -79,6 +90,7 @@ pub struct HealthResponse {
 #[derive(Debug, Deserialize)]
 pub struct SessionRequest {
     pub user_id: Option<Uuid>,
+    pub bank_id: Option<Uuid>,
     pub expectation: String,
     pub mode: SessionMode,
     pub task_context: String,
@@ -265,6 +277,7 @@ pub async fn simulate_thalamus(
     } else {
         Session::new(
             None,
+            None,
             request.expectation.unwrap_or_else(|| "preview expectation".to_string()),
             request.mode.unwrap_or(SessionMode::Exploration),
             request.task_context.unwrap_or_else(|| request.context.clone()),
@@ -366,6 +379,7 @@ pub async fn open_session(
         .system
         .open_session(
             request.user_id,
+            request.bank_id,
             request.expectation,
             request.mode,
             request.task_context,
@@ -895,6 +909,249 @@ async fn load_handle(state: &AppState, session_id: Uuid) -> ApiResult<SessionHan
     };
     put_handle(state, &handle).await;
     Ok(handle)
+}
+
+// ── Bank Endpoints ──────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct BankRequest {
+    pub name: String,
+    pub owner_id: Option<Uuid>,
+    pub bank_type: BankType,
+    pub mission: Option<String>,
+    pub directives: Vec<String>,
+    pub disposition: Option<DispositionConfig>,
+    pub parent_bank_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BankResponse {
+    pub bank: MemoryBank,
+}
+
+pub async fn list_banks(State(state): State<AppState>) -> ApiResult<Json<Vec<engram_core::BankSummary>>> {
+    let banks = state
+        .system
+        .postgres
+        .list_banks()
+        .await
+        .map_err(internal_error)?;
+    let mut summaries = Vec::with_capacity(banks.len());
+    for bank in banks {
+        let memory_count = state
+            .system
+            .postgres
+            .list_engrams()
+            .await
+            .map_err(internal_error)?
+            .iter()
+            .filter(|e| e.bank_id == Some(bank.id))
+            .count();
+        let schema_count = state
+            .system
+            .postgres
+            .list_schemas()
+            .await
+            .map_err(internal_error)?
+            .iter()
+            .filter(|s| s.bank_id == Some(bank.id))
+            .count();
+        summaries.push(engram_core::BankSummary {
+            id: bank.id,
+            name: bank.name.clone(),
+            bank_type: bank.bank_type,
+            mission: bank.mission.clone(),
+            directive_count: bank.directives.len(),
+            memory_count,
+            schema_count,
+            owner_id: bank.owner_id,
+            parent_bank_id: bank.parent_bank_id,
+        });
+    }
+    Ok(Json(summaries))
+}
+
+pub async fn get_bank(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+) -> ApiResult<Json<BankResponse>> {
+    let bank = state
+        .system
+        .postgres
+        .get_bank(bank_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("bank {bank_id} not found")))?;
+    Ok(Json(BankResponse { bank }))
+}
+
+pub async fn create_bank(
+    State(state): State<AppState>,
+    Json(request): Json<BankRequest>,
+) -> ApiResult<Json<BankResponse>> {
+    let bank = MemoryBank::new(
+        request.name,
+        request.owner_id,
+        request.bank_type,
+        request.mission,
+        request.directives,
+        request.disposition.unwrap_or_default(),
+        request.parent_bank_id,
+    );
+    state
+        .system
+        .postgres
+        .save_bank(&bank)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(BankResponse { bank }))
+}
+
+pub async fn update_bank(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+    Json(request): Json<BankRequest>,
+) -> ApiResult<Json<BankResponse>> {
+    let mut bank = state
+        .system
+        .postgres
+        .get_bank(bank_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("bank {bank_id} not found")))?;
+    bank.update(
+        request.mission,
+        request.directives,
+        request.disposition.unwrap_or_default(),
+    );
+    state
+        .system
+        .postgres
+        .save_bank(&bank)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(BankResponse { bank }))
+}
+
+pub async fn delete_bank(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+) -> ApiResult<Json<()>> {
+    state
+        .system
+        .postgres
+        .delete_bank(bank_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(()))
+}
+
+pub async fn list_bank_sessions(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<Session>>> {
+    let sessions = state
+        .system
+        .postgres
+        .list_sessions_by_bank(bank_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(sessions))
+}
+
+pub async fn list_bank_engrams(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<engram_core::EngramEntry>>> {
+    let engrams = state
+        .system
+        .postgres
+        .list_engrams_by_bank(bank_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(engrams))
+}
+
+pub async fn list_bank_schemas(
+    State(state): State<AppState>,
+    Path(bank_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<engram_core::MetaEngram>>> {
+    let schemas = state
+        .system
+        .postgres
+        .list_schemas_by_bank(bank_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(schemas))
+}
+
+// ── Working Memory Endpoints ────────────────────────────────────
+
+pub async fn list_working_memory(
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<engram_core::WorkingMemoryEntry>>> {
+    let entries = state
+        .system
+        .postgres
+        .list_working_memory()
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(entries))
+}
+
+pub async fn list_session_working_memory(
+    State(state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+) -> ApiResult<Json<Vec<engram_core::WorkingMemoryEntry>>> {
+    let entries = state
+        .system
+        .postgres
+        .list_working_memory_by_session(session_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(entries))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkingMemoryRequest {
+    pub content: String,
+    pub tags: Vec<String>,
+}
+
+pub async fn add_working_memory(
+    State(state): State<AppState>,
+    Path(session_id): Path<Uuid>,
+    Json(request): Json<WorkingMemoryRequest>,
+) -> ApiResult<Json<engram_core::WorkingMemoryEntry>> {
+    let handle = load_handle(&state, session_id).await?;
+    let embedding = state.system.pseudo_embedding(&request.content);
+    let entry = engram_core::WorkingMemoryEntry::new(
+        session_id,
+        handle.session.bank_id,
+        request.content,
+        embedding,
+        request.tags,
+    );
+    state
+        .system
+        .postgres
+        .save_working_memory(&entry)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(entry))
+}
+
+pub async fn delete_working_memory(
+    State(state): State<AppState>,
+    Path((_session_id, entry_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<Json<()>> {
+    state
+        .system
+        .postgres
+        .delete_working_memory(entry_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(()))
 }
 
 fn session_view_from_handle(handle: &SessionHandle) -> SessionView {

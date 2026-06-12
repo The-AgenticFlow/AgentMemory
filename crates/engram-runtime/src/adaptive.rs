@@ -39,6 +39,8 @@ impl AdaptiveThresholdState {
             SessionMode::Exploration => 0.08,
             SessionMode::Routine => -0.04,
             SessionMode::Critical => 0.05,
+            SessionMode::Analogy => 0.03,
+            SessionMode::Validation => 0.02,
         };
         let surprise_adjust = surprise * 0.10;
         let valence_adjust = -valence * 0.03;
@@ -52,6 +54,8 @@ impl AdaptiveThresholdState {
             SessionMode::Exploration => 2,
             SessionMode::Routine => 1,
             SessionMode::Critical => 2,
+            SessionMode::Analogy => 3,
+            SessionMode::Validation => 1,
         };
         let bias = if self.retrieval_bias > 0.05 {
             2
@@ -102,6 +106,8 @@ impl AdaptiveThresholdState {
             SessionMode::Exploration => RetrievalState::ExplorationMode,
             SessionMode::Routine => RetrievalState::PrecisionMode,
             SessionMode::Critical => RetrievalState::ValidationMode,
+            SessionMode::Analogy => RetrievalState::AnalogyMode,
+            SessionMode::Validation => RetrievalState::ValidationMode,
         }
     }
 

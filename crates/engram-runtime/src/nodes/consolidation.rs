@@ -18,7 +18,7 @@ use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
 
 /// Consolidation parameters and cross-cutting replay controls.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NightlyConsolidationNode {
     /// Strength above which an engram remains active.
     pub active_threshold: f32,
@@ -52,14 +52,17 @@ impl Default for NightlyConsolidationNode {
 }
 
 impl NightlyConsolidationNode {
-    pub fn with_config(mut self, config: &ConsolidationConfig) -> Self {
-        self.active_threshold = config.active_threshold;
-        self.archive_threshold = config.archive_threshold;
-        self.schema_threshold = config.schema_threshold;
-        self.base_decay_rate = config.base_decay_rate;
-        self.valence_decay_factor = config.valence_decay_factor;
-        self.surprise_decay_factor = config.surprise_decay_factor;
-        self
+    pub fn with_config(&self, config: &ConsolidationConfig) -> Self {
+        Self {
+            active_threshold: config.active_threshold,
+            archive_threshold: config.archive_threshold,
+            schema_threshold: config.schema_threshold,
+            base_decay_rate: config.base_decay_rate,
+            valence_decay_factor: config.valence_decay_factor,
+            surprise_decay_factor: config.surprise_decay_factor,
+            plasticity: self.plasticity.clone(),
+            stc: self.stc,
+        }
     }
 
     /// Runs decay followed by schema compression.
@@ -182,6 +185,7 @@ impl NightlyConsolidationNode {
                 strength: cluster.iter().map(|engram| engram.strength).sum::<f32>()
                     / cluster.len() as f32,
                 source_engram_ids,
+                bank_id: cluster.first().and_then(|e| e.bank_id),
                 prediction_fields,
                 created_at: chrono::Utc::now(),
             };

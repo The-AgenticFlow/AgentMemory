@@ -9,20 +9,7 @@ use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
 use crate::embeddings::cosine_similarity;
 use crate::types::RetrievalCandidate;
-
-/// Similarity threshold used to decide completion.
-#[derive(Debug, Clone, Copy)]
-pub struct PatternSepCompNode {
-    pub completion_threshold: f32,
-}
-
-impl Default for PatternSepCompNode {
-    fn default() -> Self {
-        Self {
-            completion_threshold: 0.74,
-        }
-    }
-}
+use crate::config::PatternConfig;
 
 /// Result of a separation/completion decision.
 #[derive(Debug, Clone)]
@@ -35,30 +22,63 @@ pub struct PatternDecision {
     pub similarity: f32,
 }
 
+/// Similarity threshold used to decide completion.
+#[derive(Debug, Clone, Copy)]
+pub struct PatternSepCompNode {
+    pub completion_threshold: f32,
+    pub separation_search_candidates: usize,
+    pub strength_merge_ratio: f32,
+    pub kinship_link_enabled: bool,
+    pub min_strength_for_kinship: f32,
+}
+
+impl Default for PatternSepCompNode {
+    fn default() -> Self {
+        Self {
+            completion_threshold: 0.74,
+            separation_search_candidates: 3,
+            strength_merge_ratio: 0.2,
+            kinship_link_enabled: true,
+            min_strength_for_kinship: 0.5,
+        }
+    }
+}
+
 impl PatternSepCompNode {
+    pub fn with_config(mut self, config: &PatternConfig) -> Self {
+        self.completion_threshold = config.completion_threshold;
+        self.separation_search_candidates = config.separation_search_candidates;
+        self.strength_merge_ratio = config.strength_merge_ratio;
+        self.kinship_link_enabled = config.kinship_link_enabled;
+        self.min_strength_for_kinship = config.min_strength_for_kinship;
+        self
+    }
+
     /// Resolves a buffered pattern into either a new engram or an update.
+    /// The `adjusted_threshold` is computed by the adaptive layer.
     pub async fn separate_or_complete(
         &self,
         pattern: &PatternEntry,
         session: &Session,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
-        completion_threshold: f32,
+        adjusted_threshold: f32,
     ) -> Result<PatternDecision> {
+        let search_budget = self.separation_search_candidates;
         let matches: Vec<Scored<EngramEntry>> =
-            qdrant.search_engrams(&pattern.embedding, 3).await?;
+            qdrant.search_engrams(&pattern.embedding, search_budget).await?;
         let best = matches.first().cloned();
-        let completion_threshold = completion_threshold.clamp(0.0, 1.0);
+        let effective_threshold = adjusted_threshold.clamp(0.0, 1.0);
 
         let decision = match best {
-            Some(candidate) if candidate.similarity > completion_threshold => {
+            Some(candidate) if candidate.similarity > effective_threshold => {
                 let mut engram = candidate.item.clone();
                 engram.tags.extend(pattern.context_tags.clone());
                 engram.tags.sort();
                 engram.tags.dedup();
-                engram.strength = (engram.strength + pattern.strength * 0.2).clamp(0.0, 1.0);
+                engram.strength = (engram.strength + pattern.strength * self.strength_merge_ratio).clamp(0.0, 1.0);
                 engram.touch();
-                // Accumulate content on completion
+                engram.bank_id = pattern.bank_id;
                 if let Some(ref existing) = engram.episodic_content_ref {
                     if !existing.contains(&pattern.content) {
                         engram.episodic_content_ref = Some(format!("{}; {}", existing, pattern.content));
@@ -72,7 +92,7 @@ impl PatternSepCompNode {
                     similarity: candidate.similarity,
                 }
             }
-            Some(candidate) => {
+            Some(candidate) if self.kinship_link_enabled && pattern.strength >= self.min_strength_for_kinship => {
                 let mut engram = EngramEntry::new(
                     pattern.embedding.clone(),
                     pattern.context_tags.clone(),
@@ -84,6 +104,7 @@ impl PatternSepCompNode {
                     },
                 );
                 engram.kinship_ref = Some(candidate.item.id);
+                engram.bank_id = pattern.bank_id;
                 engram.strength = pattern.strength;
                 engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
@@ -94,7 +115,7 @@ impl PatternSepCompNode {
                     similarity: candidate.similarity,
                 }
             }
-            None => {
+            Some(_) | None => {
                 let mut engram = EngramEntry::new(
                     pattern.embedding.clone(),
                     pattern.context_tags.clone(),
@@ -105,6 +126,7 @@ impl PatternSepCompNode {
                         EngramSource::Direct
                     },
                 );
+                engram.bank_id = pattern.bank_id;
                 engram.strength = pattern.strength;
                 engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
@@ -112,7 +134,7 @@ impl PatternSepCompNode {
                 PatternDecision {
                     state: PatternState::Separation,
                     engram,
-                    similarity: 0.0,
+                    similarity: matches.first().map_or(0.0, |c| c.similarity),
                 }
             }
         };

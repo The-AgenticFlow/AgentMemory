@@ -7,6 +7,10 @@
 use engram_core::{EngramEntry, Episode, Session, SessionMode, ThalamusScores};
 
 use crate::config::ThalamusConfig;
+use crate::scoring::valence::{keyword_valence_score, ValenceScorer};
+use crate::scoring::novelty::novelty_score_semantic;
+use crate::scoring::relevance::{TaskRelevanceScorer, string_overlap};
+use crate::TaskRelevanceMode;
 
 /// Full assessment produced by the thalamus filter.
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +39,16 @@ pub struct ThalamusFilterNode {
 }
 
 impl ThalamusFilterNode {
+    /// Configured from the dashboard/runtime config.
+    pub fn from_config(config: &ThalamusConfig) -> Self {
+        Self {
+            novelty_weight: config.novelty_weight,
+            surprise_weight: config.surprise_weight,
+            task_relevance_weight: config.task_relevance_weight,
+            valence_weight: config.valence_weight,
+        }
+    }
+
     /// Scores one episode against the active session and recent memory.
     pub async fn score_episode(
         &self,
@@ -54,6 +68,12 @@ impl ThalamusFilterNode {
                 exploration_threshold: 0.35,
                 routine_threshold: 0.55,
                 critical_threshold: 0.0,
+                analogy_threshold: 0.3,
+                validation_threshold: 0.6,
+                use_semantic_valence: false,
+                valence_positive_anchors: Vec::new(),
+                valence_negative_anchors: Vec::new(),
+                task_relevance_mode: TaskRelevanceMode::TokenOverlap,
             },
         )
         .await
@@ -67,10 +87,30 @@ impl ThalamusFilterNode {
         recent_engrams: Vec<EngramEntry>,
         config: &ThalamusConfig,
     ) -> ThalamusAssessment {
-        let task_relevance = string_overlap(&episode.context, &session.task_context);
+        let task_relevance = match config.task_relevance_mode {
+            TaskRelevanceMode::TokenOverlap => string_overlap(&episode.context, &session.task_context),
+            TaskRelevanceMode::Semantic => {
+                let scorer = TaskRelevanceScorer::new(TaskRelevanceMode::Semantic);
+                scorer.score(&episode.context, &session.task_context)
+            }
+        };
+
         let surprise = mismatch_score(&session.current_expectation, &episode.outcome);
-        let emotional_valence = valence_score(&episode.outcome);
-        let novelty = novelty_score(&episode.action, &recent_engrams);
+
+        let emotional_valence = if config.use_semantic_valence {
+            let scorer = ValenceScorer::from_config(config);
+            scorer.score(&episode.outcome)
+        } else {
+            keyword_valence_score(&episode.outcome)
+        };
+
+        let novelty = if recent_engrams.is_empty() {
+            1.0
+        } else {
+            let semantic_novelty = novelty_score_semantic(&episode.action, &recent_engrams);
+            let keyword_novelty = novelty_score(&episode.action, &recent_engrams);
+            (semantic_novelty + keyword_novelty) / 2.0
+        };
 
         let scores = ThalamusScores {
             novelty,
@@ -88,6 +128,8 @@ impl ThalamusFilterNode {
             SessionMode::Exploration => config.exploration_threshold,
             SessionMode::Routine => config.routine_threshold,
             SessionMode::Critical => config.critical_threshold,
+            SessionMode::Analogy => config.analogy_threshold,
+            SessionMode::Validation => config.validation_threshold,
         };
 
         ThalamusAssessment {
@@ -97,25 +139,6 @@ impl ThalamusFilterNode {
             scores,
         }
     }
-}
-
-fn string_overlap(left: &str, right: &str) -> f32 {
-    let left_tokens: std::collections::HashSet<_> = left
-        .split_whitespace()
-        .map(|token| token.to_lowercase())
-        .collect();
-    let right_tokens: std::collections::HashSet<_> = right
-        .split_whitespace()
-        .map(|token| token.to_lowercase())
-        .collect();
-
-    if left_tokens.is_empty() || right_tokens.is_empty() {
-        return 0.0;
-    }
-
-    let intersection = left_tokens.intersection(&right_tokens).count() as f32;
-    let union = left_tokens.union(&right_tokens).count() as f32;
-    intersection / union
 }
 
 fn mismatch_score(expectation: &str, outcome: &str) -> f32 {
@@ -130,16 +153,6 @@ fn mismatch_score(expectation: &str, outcome: &str) -> f32 {
     1.0 - overlap
 }
 
-fn valence_score(outcome: &str) -> f32 {
-    let lower = outcome.to_lowercase();
-    let positive = ["success", "great", "good", "done", "passed", "solved"];
-    let negative = ["error", "fail", "failed", "broken", "bad", "blocked"];
-
-    let positive_hits = positive.iter().filter(|word| lower.contains(*word)).count() as f32;
-    let negative_hits = negative.iter().filter(|word| lower.contains(*word)).count() as f32;
-    ((positive_hits - negative_hits) + 1.0).clamp(0.0, 2.0) / 2.0
-}
-
 fn novelty_score(action: &str, recent_engrams: &[EngramEntry]) -> f32 {
     if recent_engrams.is_empty() {
         return 1.0;
@@ -151,4 +164,22 @@ fn novelty_score(action: &str, recent_engrams: &[EngramEntry]) -> f32 {
         .fold(0.0, f32::max);
 
     1.0 - most_similar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analogy_mode_uses_correct_threshold() {
+        let config = ThalamusConfig::default();
+        let node = ThalamusFilterNode::default();
+        assert_eq!(config.analogy_threshold, 0.3);
+    }
+
+    #[test]
+    fn validation_mode_uses_correct_threshold() {
+        let config = ThalamusConfig::default();
+        assert_eq!(config.validation_threshold, 0.6);
+    }
 }

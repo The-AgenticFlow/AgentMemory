@@ -39,6 +39,9 @@ pub struct EngramEntry {
     pub access_count: u64,
     /// Session that produced this engram.
     pub session_ref: Uuid,
+    /// Memory bank this engram belongs to.
+    #[serde(default)]
+    pub bank_id: Option<Uuid>,
     /// Direct kinship pointer to the most similar prior engram.
     pub kinship_ref: Option<Uuid>,
     /// Whether the engram was direct, accumulated, or compressed.
@@ -64,6 +67,9 @@ pub struct MetaEngram {
     pub strength: f32,
     /// Source engrams that formed this schema.
     pub source_engram_ids: Vec<Uuid>,
+    /// Memory bank this schema belongs to (from parent bank propagation).
+    #[serde(default)]
+    pub bank_id: Option<Uuid>,
     /// Predicted fields the schema expects to see.
     pub prediction_fields: Vec<String>,
     /// Creation timestamp.
@@ -136,6 +142,7 @@ impl EngramEntry {
             last_accessed: None,
             access_count: 0,
             session_ref,
+            bank_id: None,
             kinship_ref: None,
             source,
             status: EngramStatus::Active,

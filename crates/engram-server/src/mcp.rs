@@ -93,7 +93,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             let mode = parse_mode(args.get("mode").and_then(Value::as_str).unwrap_or("Exploration"))?;
             let handle = state
                 .system
-                .open_session(None, expectation, mode, task_context)
+                .open_session(None, None, expectation, mode, task_context)
                 .await
                 .map_err(internal)?;
             state.sessions.write().await.insert(handle.session.id, handle.clone());

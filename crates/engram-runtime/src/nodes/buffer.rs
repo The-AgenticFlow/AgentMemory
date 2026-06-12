@@ -24,6 +24,16 @@ pub struct BufferIngestNode {
     pub promotion_threshold: f32,
     /// Base decay rate for new buffered patterns.
     pub decay_rate: f32,
+    /// Base coefficient for strength calculation.
+    pub strength_base_coefficient: f32,
+    /// Minimum base strength for new patterns.
+    pub strength_min_base: f32,
+    /// Surprise contribution to strength.
+    pub surprise_contribution: f32,
+    /// Valence contribution to strength.
+    pub valence_contribution: f32,
+    /// Threshold sensitivity for adjustment.
+    pub threshold_sensitivity: f32,
 }
 
 impl Default for BufferIngestNode {
@@ -32,6 +42,11 @@ impl Default for BufferIngestNode {
             similarity_threshold: 0.72,
             promotion_threshold: 0.88,
             decay_rate: 0.08,
+            strength_base_coefficient: 0.25,
+            strength_min_base: 0.05,
+            surprise_contribution: 0.08,
+            valence_contribution: 0.03,
+            threshold_sensitivity: 0.1,
         }
     }
 }
@@ -42,6 +57,11 @@ impl BufferIngestNode {
         self.similarity_threshold = config.similarity_threshold;
         self.promotion_threshold = config.promotion_threshold;
         self.decay_rate = config.decay_rate;
+        self.strength_base_coefficient = config.strength_base_coefficient;
+        self.strength_min_base = config.strength_min_base;
+        self.surprise_contribution = config.surprise_contribution;
+        self.valence_contribution = config.valence_contribution;
+        self.threshold_sensitivity = config.threshold_sensitivity;
         self
     }
 
@@ -81,8 +101,12 @@ impl BufferIngestNode {
                     episode.created_at,
                     pattern.last_seen,
                 );
+                let base_strength = (assessment.score * self.strength_base_coefficient)
+                    .max(self.strength_min_base);
                 let strength_delta = plasticity.strength_delta(
-                    (assessment.score * 0.25).max(0.05) + temporal_signal.spillover,
+                    base_strength
+                        + assessment.scores.surprise * self.surprise_contribution
+                        + temporal_signal.spillover,
                     signal,
                 );
                 pattern.record_activation(episode.id, strength_delta);
@@ -95,42 +119,42 @@ impl BufferIngestNode {
                 pattern.decay_rate = plasticity.decay_rate(pattern.decay_rate, signal);
                 if signal.reconsolidation_open || temporal_signal.within_window {
                     pattern.threshold =
-                        (pattern.threshold - temporal_signal.spillover * 0.1).clamp(0.0, 1.0);
+                        (pattern.threshold - temporal_signal.spillover * self.threshold_sensitivity).clamp(0.0, 1.0);
                 }
                 pattern
             }
-            None => PatternEntry::new(
-                pattern_hash,
-                embedding,
-                context_tags,
-                &episode_text,
-                (self.promotion_threshold + assessment.scores.surprise * 0.08
-                    - assessment.scores.emotional_valence * 0.03)
-                    .clamp(0.0, 1.0),
-                plasticity.decay_rate(
-                    self.decay_rate,
-                    plasticity.signal(
-                        &assessment.scores,
-                        session.current_mode,
-                        matches!(session.current_mode, engram_core::SessionMode::Critical),
-                        None,
-                    ),
-                ),
-                PatternSource::Buffered,
-                episode.id,
-            ),
+            None => {
+                let base_plasticity_signal = plasticity.signal(
+                    &assessment.scores,
+                    session.current_mode,
+                    matches!(session.current_mode, engram_core::SessionMode::Critical),
+                    None,
+                );
+                PatternEntry::with_bank(
+                    pattern_hash,
+                    embedding,
+                    context_tags,
+                    &episode_text,
+                    (self.promotion_threshold
+                        + assessment.scores.surprise * self.surprise_contribution
+                        - assessment.scores.emotional_valence * self.valence_contribution)
+                        .clamp(0.0, 1.0),
+                    plasticity.decay_rate(self.decay_rate, base_plasticity_signal),
+                    PatternSource::Buffered,
+                    episode.id,
+                    episode.bank_id,
+                )
+            }
         };
 
         entry.strength = entry.strength.max(assessment.score).clamp(0.0, 1.0);
-        if plasticity
-            .signal(
-                &assessment.scores,
-                session.current_mode,
-                matches!(session.current_mode, engram_core::SessionMode::Critical),
-                Some(entry.last_seen),
-            )
-            .high_plasticity
-        {
+        let check_signal = plasticity.signal(
+            &assessment.scores,
+            session.current_mode,
+            matches!(session.current_mode, engram_core::SessionMode::Critical),
+            Some(entry.last_seen),
+        );
+        if check_signal.high_plasticity {
             entry.strength = (entry.strength + 0.05).clamp(0.0, 1.0);
         }
         store.upsert_pattern(&entry).await?;

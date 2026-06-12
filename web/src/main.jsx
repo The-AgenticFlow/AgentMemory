@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const emptyMemory = { episodes: [], patterns: [], engrams: [], schemas: [] };
-const tabs = ["overview", "graph", "buffers", "engrams", "schemas", "thalamus", "tuning"];
+const tabs = ["overview", "graph", "sessions", "banks", "buffers", "engrams", "schemas", "working-memory", "thalamus", "tuning", "performance"];
 const graphKindOrder = ["session", "working_context", "episode", "pattern", "engram", "schema"];
 const graphCanvas = { width: 1000, height: 700 };
 
@@ -17,23 +17,32 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [status, setStatus] = useState("Loading");
   const [sim, setSim] = useState(null);
+  const [banks, setBanks] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [workingMemory, setWorkingMemory] = useState([]);
 
   async function refresh() {
     const health = await safeApi("/health");
-    const [overviewData, graphData, episodes, patterns, engrams, schemas, configData] = await Promise.all([
+    const [overviewData, graphData, episodes, patterns, engrams, schemas, configData, banksData, sessionsData, wmData] = await Promise.all([
       safeApi("/control/overview"),
       safeApi("/control/graph"),
       safeApi("/memory/episodes", []),
       safeApi("/memory/patterns", []),
       safeApi("/memory/engrams", []),
       safeApi("/memory/schemas", []),
-      safeApi("/control/config")
+      safeApi("/control/config"),
+      safeApi("/banks", []),
+      safeApi("/sessions", []),
+      safeApi("/working-memory", [])
     ]);
     setOverview(overviewData);
     setGraph(graphData || { nodes: [], edges: [] });
     setMemory({ episodes, patterns, engrams, schemas });
     setConfig(configData);
     setStatus(health ? `Live · ${health.sessions} sessions` : "Backend unavailable");
+    setBanks(banksData || []);
+    setSessions(sessionsData || []);
+    setWorkingMemory(wmData || []);
   }
 
   useEffect(() => {
@@ -163,6 +172,12 @@ function App() {
           {activeTab === "graph" && (
             <GraphTab graph={graph} selectedKind={selectedKind} setSelectedKind={setSelectedKind} />
           )}
+          {activeTab === "sessions" && (
+            <SessionsTab sessions={sessions} banks={banks} />
+          )}
+          {activeTab === "banks" && (
+            <BanksTab banks={banks} />
+          )}
           {activeTab === "buffers" && (
             <MemoryTab
               title="Buffers"
@@ -187,11 +202,17 @@ function App() {
               columns={["id", "strength", "prediction_fields", "source_engram_ids"]}
             />
           )}
+          {activeTab === "working-memory" && (
+            <WorkingMemoryTab entries={workingMemory} />
+          )}
           {activeTab === "thalamus" && (
             <ThalamusTab sim={sim} onSubmit={runThalamusPreview} onDeepSleep={consolidate} />
           )}
           {activeTab === "tuning" && config && (
             <TuningTab config={config} onSave={saveConfig} onReset={resetConfig} />
+          )}
+          {activeTab === "performance" && (
+            <PerformanceTab overview={overview} />
           )}
         </section>
       </section>
@@ -324,6 +345,8 @@ function ThalamusTab({ sim, onSubmit, onDeepSleep }) {
             <option>Exploration</option>
             <option>Routine</option>
             <option>Critical</option>
+            <option>Analogy</option>
+            <option>Validation</option>
           </select>
           <button className="primary" type="submit">Simulate</button>
         </form>
@@ -651,6 +674,7 @@ function ScoreCard({ sim }) {
 
 function ConfigEditor({ config, onSave, onReset }) {
   const [draft, setDraft] = useState(config);
+  const [activeProfile, setActiveProfile] = useState(config?.tuning_profile || "Balanced");
   useEffect(() => setDraft(config), [config]);
 
   function setNumber(path, value) {
@@ -661,56 +685,133 @@ function ConfigEditor({ config, onSave, onReset }) {
     setDraft(next);
   }
 
+  async function applyProfile(profile) {
+    setActiveProfile(profile);
+    const body = { ...draft, tuning_profile: profile };
+    const saved = await api("/control/config", { method: "PUT", body });
+    setDraft(saved);
+    await onSave(saved);
+  }
+
   const groups = [
     {
-      title: "Thalamus",
+      title: "Thalamus Intake",
       fields: [
-        ["thalamus", "novelty_weight"], ["thalamus", "surprise_weight"], ["thalamus", "task_relevance_weight"], ["thalamus", "valence_weight"]
+        ["thalamus", "novelty_weight", "Novelty Weight", "How much weight to give new/unfamiliar patterns", 0, 1],
+        ["thalamus", "surprise_weight", "Surprise Weight", "How much weight to give unexpected outcomes", 0, 1],
+        ["thalamus", "task_relevance_weight", "Relevance Weight", "How much weight to give task-context match", 0, 1],
+        ["thalamus", "valence_weight", "Valence Weight", "How much weight to give emotional tone", 0, 1],
+      ]
+    },
+    {
+      title: "Mode Thresholds",
+      fields: [
+        ["thalamus", "exploration_threshold", "Exploration", "Minimum score to accept in exploration mode", 0, 1],
+        ["thalamus", "routine_threshold", "Routine", "Minimum score to accept in routine mode", 0, 1],
+        ["thalamus", "critical_threshold", "Critical", "Minimum score to accept in critical mode", 0, 1],
+        ["thalamus", "analogy_threshold", "Analogy", "Minimum score in cross-domain analogy mode", 0, 1],
+        ["thalamus", "validation_threshold", "Validation", "Minimum score in evidence-based validation mode", 0, 1],
       ]
     },
     {
       title: "Buffer",
       fields: [
-        ["buffer", "similarity_threshold"], ["buffer", "promotion_threshold"], ["buffer", "decay_rate"]
+        ["buffer", "similarity_threshold", "Similarity Threshold", "Similarity needed to merge buffered patterns", 0, 1],
+        ["buffer", "promotion_threshold", "Promotion Threshold", "Threshold for promoting a pattern to engram", 0, 1],
+        ["buffer", "decay_rate", "Decay Rate", "Base decay rate for buffered patterns", 0, 1],
+        ["buffer", "strength_base_coefficient", "Strength Base", "Base coefficient for strength calculation", 0, 1],
+        ["buffer", "surprise_contribution", "Surprise Contrib", "How much surprise contributes to strength", 0, 1],
+        ["buffer", "valence_contribution", "Valence Contrib", "How much valence contributes to strength", 0, 1],
+      ]
+    },
+    {
+      title: "Pattern Resolution",
+      fields: [
+        ["pattern", "completion_threshold", "Completion Threshold", "Similarity needed to merge with existing engram", 0.5, 1.0],
+        ["pattern", "separation_search_candidates", "Search Candidates", "Number of candidates to check during separation", 1, 10],
+        ["pattern", "strength_merge_ratio", "Merge Ratio", "How much of pattern strength merges into engram", 0, 1],
       ]
     },
     {
       title: "Retrieval",
       fields: [
-        ["pattern", "completion_threshold"], ["retrieval", "top_k"]
+        ["retrieval", "top_k", "Top K", "Number of results to return", 1, 20],
+        ["retrieval", "keyword_tag_weight", "Tag Weight", "Weight for keyword-tag overlap boost", 0, 0.2],
+        ["retrieval", "keyword_content_weight", "Content Weight", "Weight for keyword-content overlap boost", 0, 0.2],
+        ["retrieval", "schema_bonus_weight", "Schema Bonus", "Weight for schema prediction match bonus", 0, 0.2],
+        ["retrieval", "max_content_length", "Max Content", "Maximum content length before truncation", 50, 1000],
       ]
     },
     {
       title: "Consolidation",
       fields: [
-        ["consolidation", "active_threshold"], ["consolidation", "archive_threshold"], ["consolidation", "schema_threshold"], ["consolidation", "base_decay_rate"]
+        ["consolidation", "active_threshold", "Active Threshold", "Strength above which engram stays active", 0, 1],
+        ["consolidation", "archive_threshold", "Archive Threshold", "Strength below which engram gets archived", 0, 1],
+        ["consolidation", "schema_threshold", "Schema Threshold", "Similarity threshold for schema formation", 0, 1],
+        ["consolidation", "base_decay_rate", "Decay Rate", "Base decay rate per day of inactivity", 0, 1],
       ]
     }
   ];
 
   return (
     <div className="config-shell">
+      <div className="config-presets">
+        <span>Profiles:</span>
+        {["Conservative", "Balanced", "Exploratory", "Adaptive"].map(profile => (
+          <button
+            key={profile}
+            className={`preset-btn ${activeProfile === profile ? "active" : ""}`}
+            type="button"
+            onClick={() => applyProfile(profile)}
+          >
+            {profile}
+          </button>
+        ))}
+      </div>
       {groups.map((group) => (
         <section className="config-group" key={group.title}>
           <h4>{group.title}</h4>
           <div className="config-grid">
-            {group.fields.map((path) => (
-              <label key={path.join(".")}>
-                <span>{path.join(".")}</span>
-                <input
-                  type="number"
-                  step={path.at(-1) === "top_k" ? "1" : "0.01"}
-                  value={path.reduce((obj, key) => obj[key], draft)}
-                  onChange={(event) => setNumber(path, event.target.value)}
-                />
-              </label>
-            ))}
+            {group.fields.map((field) => {
+              const [section, key, label, description, min, max] = field;
+              const value = draft[section][key];
+              const step = key === "top_k" || key === "separation_search_candidates" || key === "max_content_length" ? "1" : "0.01";
+              return (
+                <div className="config-field" key={section + "." + key}>
+                  <label>
+                    <span className="config-label">{label}</span>
+                    <div className="slider-row">
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={value}
+                        onChange={(event) => setNumber([section, key], event.target.value)}
+                        title={description}
+                      />
+                      <input
+                        type="number"
+                        step={step}
+                        min={min}
+                        max={max}
+                        value={value}
+                        onChange={(event) => setNumber([section, key], event.target.value)}
+                        className="config-input"
+                        title={description}
+                      />
+                    </div>
+                  </label>
+                  <small className="config-desc">{description}</small>
+                </div>
+              );
+            })}
           </div>
         </section>
       ))}
       <div className="actions">
         <button className="primary slim" onClick={() => onSave(draft)}>Save</button>
-        <button className="secondary slim" onClick={onReset}>Reset</button>
+        <button className="secondary slim" onClick={onReset}>Reset to Defaults</button>
       </div>
     </div>
   );
@@ -739,15 +840,25 @@ function labelForTab(tab) {
     ? "Overview"
     : tab === "graph"
       ? "Graph"
-      : tab === "buffers"
-        ? "Buffers"
-      : tab === "engrams"
-          ? "Engrams"
-          : tab === "schemas"
-            ? "Schemas"
-            : tab === "thalamus"
-              ? "Thalamus"
-              : "Tuning";
+      : tab === "sessions"
+        ? "Sessions"
+        : tab === "banks"
+          ? "Banks"
+          : tab === "buffers"
+            ? "Buffers"
+            : tab === "engrams"
+              ? "Engrams"
+              : tab === "schemas"
+                ? "Schemas"
+                : tab === "working-memory"
+                  ? "Working Memory"
+                  : tab === "thalamus"
+                    ? "Thalamus"
+                    : tab === "tuning"
+                      ? "Tuning"
+                      : tab === "performance"
+                        ? "Performance"
+                        : tab;
 }
 
 function formatCell(value) {
@@ -907,6 +1018,206 @@ function pointFromEvent(event, rect) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function SessionsTab({ sessions, banks }) {
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Sessions" subtitle="Active and closed session history with bank context." />
+        {sessions.length === 0 ? (
+          <div className="empty-state">No sessions yet.</div>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Mode</th>
+                  <th>Bank</th>
+                  <th>Expectation</th>
+                  <th>Created</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.slice(0, 30).map((session) => {
+                  const bank = banks.find(b => b.id === session.bank_id);
+                  return (
+                    <tr key={session.id}>
+                      <td>{shortId(session.id, 10)}</td>
+                      <td><span className="badge ok">{session.current_mode}</span></td>
+                      <td>{bank ? bank.name : "—"}</td>
+                      <td>{truncate(session.current_expectation, 40)}</td>
+                      <td>{formatDate(session.created_at)}</td>
+                      <td>{session.closed_at ? <span className="badge reject">closed</span> : <span className="badge ok">active</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function BanksTab({ banks }) {
+  const [bankFilter, setBankFilter] = useState("all");
+  const filtered = bankFilter === "all" ? banks : banks.filter(b => b.bank_type === bankFilter);
+
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Memory Banks" subtitle="Hierarchical, multi-tenant memory isolation layers." />
+        <div className="filter-row">
+          {["all", "session", "dictionary", "shared"].map(type => (
+            <button
+              key={type}
+              className={bankFilter === type ? "chip active" : "chip"}
+              onClick={() => setBankFilter(type)}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+        <div className="bank-grid">
+          {filtered.length === 0 ? (
+            <div className="empty-state">No banks found.</div>
+          ) : (
+            filtered.map(bank => (
+              <BankCard key={bank.id} bank={bank} />
+            ))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BankCard({ bank }) {
+  return (
+    <div className="bank-card">
+      <div className="bank-card-header">
+        <h4>{bank.name}</h4>
+        <span className={`badge ${bank.bank_type === "shared" ? "accent" : "ok"}`}>{bank.bank_type}</span>
+      </div>
+      {bank.mission && <p className="bank-mission">{truncate(bank.mission, 80)}</p>}
+      <div className="bank-stats">
+        <div><span>Memories</span><strong>{bank.memory_count ?? "—"}</strong></div>
+        <div><span>Schemas</span><strong>{bank.schema_count ?? "—"}</strong></div>
+        <div><span>Directives</span><strong>{bank.directive_count ?? "—"}</strong></div>
+      </div>
+      {bank.parent_bank_id && (
+        <small className="bank-parent">Parent: {shortId(bank.parent_bank_id, 10)}</small>
+      )}
+    </div>
+  );
+}
+
+function WorkingMemoryTab({ entries }) {
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Working Memory" subtitle="Pre-consolidation fragile memory entries." />
+        {entries.length === 0 ? (
+          <div className="empty-state">No working memory entries.</div>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Content</th>
+                  <th>Strength</th>
+                  <th>Tags</th>
+                  <th>Session</th>
+                  <th>Decay Rate</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.slice(0, 30).map(entry => (
+                  <tr key={entry.id}>
+                    <td>{truncate(entry.content, 60)}</td>
+                    <td><strong>{formatNumber(entry.strength)}</strong></td>
+                    <td>{(entry.tags || []).slice(0, 3).join(", ")}</td>
+                    <td>{shortId(entry.session_id, 10)}</td>
+                    <td>{formatNumber(entry.decay_rate)}</td>
+                    <td>{formatDate(entry.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PerformanceTab({ overview }) {
+  const activeConfig = overview?.active_config || {};
+  const thalamus = activeConfig.thalamus || {};
+  const buffer = activeConfig.buffer || {};
+  const pattern = activeConfig.pattern || {};
+  const retrieval = activeConfig.retrieval || {};
+  const scores = overview?.latest_scores || [];
+
+  const avgScore = scores.length > 0
+    ? (scores.reduce((sum, r) => sum + r.score, 0) / scores.length)
+    : 0;
+  const acceptanceRate = scores.length > 0
+    ? (scores.filter(r => r.accepted).length / scores.length * 100)
+    : 0;
+
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Performance Metrics" subtitle="Intake pipeline efficiency and memory quality." />
+        <div className="metric-grid">
+          <Metric label="Avg Intake Score" value={formatNumber(avgScore)} />
+          <Metric label="Acceptance Rate" value={`${acceptanceRate.toFixed(1)}%`} />
+          <Metric label="Total Episodes" value={overview?.counts?.episodes ?? "—"} />
+          <Metric label="Active Engrams" value={overview?.counts?.engrams ?? "—"} />
+          <Metric label="Schema Count" value={overview?.counts?.schemas ?? "—"} />
+          <Metric label="Buffer Patterns" value={overview?.counts?.patterns ?? "—"} />
+        </div>
+      </section>
+
+      <section className="panel subtle">
+        <PanelTitle title="Score History" subtitle="Recent ingestion outcomes." />
+        {scores.length === 0 ? (
+          <div className="empty-state">No score history available.</div>
+        ) : (
+          <div className="score-list compact">
+            {scores.map((record) => (
+              <div className="score-row compact" key={record.id}>
+                <span className={record.accepted ? "badge ok" : "badge reject"}>{record.accepted ? "accepted" : "rejected"}</span>
+                <strong>{record.score.toFixed(3)}</strong>
+                <small>threshold: {record.threshold.toFixed(3)}</small>
+                <small>{formatDate(record.created_at)}</small>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel subtle">
+        <PanelTitle title="Tuning Profile" subtitle="Current configuration parameters." />
+        <div className="detail-grid">
+          <DetailItem label="Novelty Weight" value={formatNumber(thalamus.novelty_weight)} />
+          <DetailItem label="Surprise Weight" value={formatNumber(thalamus.surprise_weight)} />
+          <DetailItem label="Relevance Weight" value={formatNumber(thalamus.task_relevance_weight)} />
+          <DetailItem label="Valence Weight" value={formatNumber(thalamus.valence_weight)} />
+          <DetailItem label="Exploration Threshold" value={formatNumber(thalamus.exploration_threshold)} />
+          <DetailItem label="Completion Threshold" value={formatNumber(pattern.completion_threshold)} />
+          <DetailItem label="Buffer Similarity" value={formatNumber(buffer.similarity_threshold)} />
+          <DetailItem label="Retrieval Top K" value={retrieval.top_k ?? "—"} />
+        </div>
+      </section>
+    </div>
+  );
 }
 
 createRoot(document.getElementById("root")).render(<App />);

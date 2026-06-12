@@ -7,6 +7,7 @@ fn episode_session_and_context_can_be_created() {
     let episode = Episode::new("read paper", "research mode", "stored", session_id);
     let session = Session::new(
         Some(Uuid::new_v4()),
+        None,
         "find memory architecture",
         SessionMode::Exploration,
         "research task",

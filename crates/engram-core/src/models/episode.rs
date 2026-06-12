@@ -31,6 +31,9 @@ pub struct Episode {
     pub outcome: String,
     /// Session that owns this experience.
     pub session_id: Uuid,
+    /// Memory bank this episode belongs to (optional for backwards compatibility).
+    #[serde(default)]
+    pub bank_id: Option<Uuid>,
     /// When the episode was created.
     pub created_at: DateTime<Utc>,
 }
@@ -43,12 +46,24 @@ impl Episode {
         outcome: impl Into<String>,
         session_id: Uuid,
     ) -> Self {
+        Self::with_bank(action, context, outcome, session_id, None)
+    }
+
+    /// Constructs a new episode with an explicit bank context.
+    pub fn with_bank(
+        action: impl Into<String>,
+        context: impl Into<String>,
+        outcome: impl Into<String>,
+        session_id: Uuid,
+        bank_id: Option<Uuid>,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
             action: action.into(),
             context: context.into(),
             outcome: outcome.into(),
             session_id,
+            bank_id,
             created_at: Utc::now(),
         }
     }

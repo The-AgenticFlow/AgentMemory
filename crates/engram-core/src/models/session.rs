@@ -28,6 +28,10 @@ pub enum SessionMode {
     Routine,
     /// High-stakes mode where nothing should be silently lost.
     Critical,
+    /// Cross-domain structural similarity search.
+    Analogy,
+    /// Evidence-based retrieval with validation.
+    Validation,
 }
 
 /// The active state for one user task or interaction sequence.
@@ -37,6 +41,8 @@ pub struct Session {
     pub id: Uuid,
     /// Optional owning user.
     pub user_id: Option<Uuid>,
+    /// Memory bank this session belongs to.
+    pub bank_id: Option<Uuid>,
     /// What the agent currently expects to happen.
     pub current_expectation: String,
     /// How aggressively the system should accept new episodes.
@@ -55,6 +61,7 @@ impl Session {
     /// Creates a fresh session with the current mode and expectation.
     pub fn new(
         user_id: Option<Uuid>,
+        bank_id: Option<Uuid>,
         current_expectation: impl Into<String>,
         current_mode: SessionMode,
         task_context: impl Into<String>,
@@ -63,6 +70,7 @@ impl Session {
         Self {
             id: Uuid::new_v4(),
             user_id,
+            bank_id,
             current_expectation: current_expectation.into(),
             current_mode,
             task_context: task_context.into(),

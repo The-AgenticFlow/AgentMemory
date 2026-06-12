@@ -45,6 +45,9 @@ pub struct PatternEntry {
     pub source: PatternSource,
     /// Episode references that contributed to this entry.
     pub episode_refs: Vec<Uuid>,
+    /// Memory bank this pattern belongs to.
+    #[serde(default)]
+    pub bank_id: Option<Uuid>,
 }
 
 /// The origin of a buffered pattern.
@@ -69,6 +72,21 @@ impl PatternEntry {
         source: PatternSource,
         episode_ref: Uuid,
     ) -> Self {
+        Self::with_bank(pattern_hash, embedding, context_tags, content, threshold, decay_rate, source, episode_ref, None)
+    }
+
+    /// Creates the first buffered representation with an explicit bank context.
+    pub fn with_bank(
+        pattern_hash: impl Into<String>,
+        embedding: Vec<f32>,
+        context_tags: Vec<String>,
+        content: impl Into<String>,
+        threshold: f32,
+        decay_rate: f32,
+        source: PatternSource,
+        episode_ref: Uuid,
+        bank_id: Option<Uuid>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             pattern_hash: pattern_hash.into(),
@@ -83,6 +101,7 @@ impl PatternEntry {
             decay_rate,
             source,
             episode_refs: vec![episode_ref],
+            bank_id,
         }
     }
 

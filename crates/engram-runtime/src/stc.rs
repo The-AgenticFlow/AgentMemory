@@ -23,6 +23,8 @@ pub struct SynapticTaggingCapture {
     pub exploration_window_minutes: i64,
     pub routine_window_minutes: i64,
     pub critical_window_minutes: i64,
+    pub analogy_window_minutes: i64,
+    pub validation_window_minutes: i64,
     pub max_spillover: f32,
 }
 
@@ -32,6 +34,8 @@ impl Default for SynapticTaggingCapture {
             exploration_window_minutes: 240,
             routine_window_minutes: 30,
             critical_window_minutes: 90,
+            analogy_window_minutes: 180,
+            validation_window_minutes: 60,
             max_spillover: 0.30,
         }
     }
@@ -44,6 +48,8 @@ impl SynapticTaggingCapture {
             SessionMode::Exploration => self.exploration_window_minutes,
             SessionMode::Routine => self.routine_window_minutes,
             SessionMode::Critical => self.critical_window_minutes,
+            SessionMode::Analogy => self.analogy_window_minutes,
+            SessionMode::Validation => self.validation_window_minutes,
         }
     }
 
@@ -84,6 +90,8 @@ impl SynapticTaggingCapture {
             SessionMode::Exploration => 1.0,
             SessionMode::Routine => 0.95,
             SessionMode::Critical => 1.05,
+            SessionMode::Analogy => 1.02,
+            SessionMode::Validation => 0.98,
         };
         let access_bonus = (access_count.min(10) as f32) * 0.03;
         (base + access_bonus + surprise * 0.08).clamp(0.85, 1.25)
@@ -97,7 +105,7 @@ mod tests {
     #[test]
     fn spillover_is_bounded_by_window() {
         let stc = SynapticTaggingCapture::default();
-        let session = Session::new(None, "expect", SessionMode::Exploration, "task");
+        let session = Session::new(None, None, "expect", SessionMode::Exploration, "task");
         let now = Utc::now();
         let signal = stc.signal(&session, 0.8, now, now);
 

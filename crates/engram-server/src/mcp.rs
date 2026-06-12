@@ -202,9 +202,9 @@ async fn read_resource(state: &AppState, params: Value) -> Result<Value, (i64, S
         .and_then(Value::as_str)
         .ok_or_else(|| (-32602, "resources/read requires params.uri".to_string()))?;
     let value = if uri == "engram://overview" {
-        serde_json::to_value(state.system.overview().await.map_err(internal)?).map_err(internal)?
+        serde_json::to_value(state.system.overview(None).await.map_err(internal)?).map_err(internal)?
     } else if uri == "engram://graph" {
-        serde_json::to_value(state.system.control_graph().await.map_err(internal)?).map_err(internal)?
+        serde_json::to_value(state.system.control_graph(None).await.map_err(internal)?).map_err(internal)?
     } else if let Some(id) = uri.strip_prefix("engram://sessions/") {
         let session_id = Uuid::parse_str(id).map_err(internal)?;
         let handle = load_handle(state, session_id).await?;

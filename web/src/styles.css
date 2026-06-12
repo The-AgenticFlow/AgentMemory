@@ -1192,6 +1192,56 @@ input::placeholder {
   100% { opacity: 1; }
 }
 
+/* Bank selector in topbar */
+.bank-select {
+  width: 100%;
+  background: var(--ui-navy-950);
+  color: var(--ui-white);
+  border: 1px solid var(--ui-line);
+  padding: 8px 10px;
+  font-size: 0.88rem;
+  margin-top: 4px;
+}
+
+/* Bank grid for overview */
+.bank-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  margin-top: var(--space-16);
+}
+
+.bank-card {
+  border: 1px solid var(--ui-line);
+  padding: var(--space-16);
+  background: var(--ui-navy-950);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bank-card strong {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--ui-white);
+}
+
+.bank-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--ui-gray-500);
+  font-size: 0.78rem;
+}
+
+.bank-card .badge {
+  display: inline-flex;
+  margin-top: 6px;
+  border: 1px solid var(--ui-line-strong);
+  color: var(--ui-gray-300);
+  background: transparent;
+}
+
 /* Responsive */
 @media (max-width: 1180px) {
   .topbar,
@@ -1199,16 +1249,13 @@ input::placeholder {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
-
   .span-2 {
     grid-column: auto;
   }
-
   .hero-summary {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
   }
-
   .summary-card:first-child { border-left: none; }
   .summary-card { border-left: 1px solid var(--ui-line); border-top: none; }
 }

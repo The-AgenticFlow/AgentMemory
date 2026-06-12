@@ -45,6 +45,9 @@ pub struct WorkingContext {
     pub id: Uuid,
     /// Owning session id.
     pub session_id: Uuid,
+    /// Memory bank this working context belongs to.
+    #[serde(default)]
+    pub bank_id: Option<Uuid>,
     /// Task identifier inside the session.
     pub task_id: String,
     /// Ordered goals and subgoals.
@@ -67,11 +70,12 @@ pub struct WorkingContext {
 
 impl WorkingContext {
     /// Creates a fresh workspace for one task inside a session.
-    pub fn new(session_id: Uuid, task_id: impl Into<String>) -> Self {
+    pub fn new(session_id: Uuid, bank_id: Option<Uuid>, task_id: impl Into<String>) -> Self {
         let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             session_id,
+            bank_id,
             task_id: task_id.into(),
             goal_stack: Vec::new(),
             active_engrams: Vec::new(),

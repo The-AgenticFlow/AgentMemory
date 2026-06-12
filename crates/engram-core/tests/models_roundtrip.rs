@@ -12,7 +12,7 @@ fn episode_session_and_context_can_be_created() {
         SessionMode::Exploration,
         "research task",
     );
-    let context = WorkingContext::new(session.id, "task-001");
+    let context = WorkingContext::new(session.id, session.bank_id, "task-001");
 
     assert_eq!(episode.session_id, session_id);
     assert_eq!(session.current_mode, SessionMode::Exploration);

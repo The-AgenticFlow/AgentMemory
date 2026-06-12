@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const emptyMemory = { episodes: [], patterns: [], engrams: [], schemas: [] };
-const tabs = ["overview", "graph", "sessions", "banks", "buffers", "engrams", "schemas", "working-memory", "thalamus", "tuning", "performance", "experiments"];
+const emptyMemory = { episodes: [], patterns: [], engrams: [], schemas: [], workingMemory: [] };
+const tabs = ["overview", "graph", "sessions", "episodes", "engrams", "schemas", "working-memory", "thalamus", "tuning", "performance"];
 const graphKindOrder = ["session", "working_context", "episode", "pattern", "engram", "schema"];
 const graphCanvas = { width: 1000, height: 700 };
 
@@ -18,54 +18,77 @@ function App() {
   const [status, setStatus] = useState("Loading");
   const [sim, setSim] = useState(null);
   const [banks, setBanks] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [workingMemory, setWorkingMemory] = useState([]);
+  const [selectedBank, setSelectedBank] = useState("");
 
-  async function refresh() {
+  function apiQuery(path, bankId) {
+    return bankId ? `${path}?bank_id=${bankId}` : path;
+  }
+
+  async function refresh(bankId = selectedBank) {
     const health = await safeApi("/health");
-    const [overviewData, graphData, episodes, patterns, engrams, schemas, configData, banksData, sessionsData, wmData] = await Promise.all([
-      safeApi("/control/overview"),
-      safeApi("/control/graph"),
-      safeApi("/memory/episodes", []),
-      safeApi("/memory/patterns", []),
-      safeApi("/memory/engrams", []),
-      safeApi("/memory/schemas", []),
+    const banksData = await safeApi("/banks", []);
+    setBanks(banksData);
+
+    // If no bank selected and we have banks, auto-select the first one
+    // (except on initial load where selectedBank might already be set)
+    let effectiveBank = bankId;
+    if (!effectiveBank && banksData.length > 0) {
+      effectiveBank = banksData[0].id;
+      setSelectedBank(effectiveBank);
+    }
+
+    const q = apiQuery;
+    const [overviewData, graphData, episodes, patterns, engrams, schemas, sessionsData, wmData, configData] = await Promise.all([
+      safeApi(q("/control/overview", effectiveBank)),
+      safeApi(q("/control/graph", effectiveBank)),
+      safeApi(q("/memory/episodes", effectiveBank), []),
+      safeApi(q("/memory/patterns", effectiveBank), []),
+      safeApi(q("/memory/engrams", effectiveBank), []),
+      safeApi(q("/memory/schemas", effectiveBank), []),
+      safeApi(q("/sessions", effectiveBank), []),
+      safeApi(q("/working-memory", effectiveBank), []),
       safeApi("/control/config"),
-      safeApi("/banks", []),
-      safeApi("/sessions", []),
-      safeApi("/working-memory", [])
     ]);
+
+    // Flatten SessionSummary -> SessionView -> Session for table display
+    const flatSessions = (sessionsData || []).map((s) => s.session?.session || {});
+
     setOverview(overviewData);
     setGraph(graphData || { nodes: [], edges: [] });
-    setMemory({ episodes, patterns, engrams, schemas });
+    setMemory({ episodes, patterns, engrams, schemas, sessions: flatSessions, workingMemory: wmData || [] });
     setConfig(configData);
     setStatus(health ? `Live · ${health.sessions} sessions` : "Backend unavailable");
-    setBanks(banksData || []);
-    setSessions(sessionsData || []);
-    setWorkingMemory(wmData || []);
   }
 
   useEffect(() => {
-    refresh().catch((error) => setStatus(error.message));
-    const timer = window.setInterval(() => refresh().catch((error) => setStatus(error.message)), 15000);
-    const handleRefresh = () => refresh().catch((error) => setStatus(error.message));
+    refresh("").catch((error) => setStatus(error.message));
+    const timer = window.setInterval(() => refresh(selectedBank).catch((error) => setStatus(error.message)), 15000);
+    const handleRefresh = () => refresh(selectedBank).catch((error) => setStatus(error.message));
     window.addEventListener("engram-refresh", handleRefresh);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("engram-refresh", handleRefresh);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (selectedBank) {
+      refresh(selectedBank).catch((error) => setStatus(error.message));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBank]);
 
   async function saveConfig(nextConfig) {
     const saved = await api("/control/config", { method: "PUT", body: nextConfig });
     setConfig(saved);
-    await refresh();
+    await refresh(selectedBank);
   }
 
   async function resetConfig() {
     const saved = await api("/control/config/reset", { method: "POST" });
     setConfig(saved);
-    await refresh();
+    await refresh(selectedBank);
   }
 
   async function runThalamusPreview(event) {
@@ -88,10 +111,36 @@ function App() {
   async function consolidate() {
     setStatus("Consolidating");
     await safeApi("/consolidate", null, { method: "POST", body: { debug: true } });
-    await refresh();
+    await refresh(selectedBank);
+  }
+
+  async function createBank(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const directives = (form.get("directives") || "").toString().split("\n").filter((s) => s.trim());
+    await api("/banks", {
+      method: "POST",
+      body: {
+        name: form.get("name"),
+        bank_type: form.get("bank_type"),
+        mission: form.get("mission") || null,
+        directives,
+        disposition: { skepticism: 2, literalism: 2, empathy: 3, verbosity: 2 },
+        parent_bank_id: form.get("parent_bank_id") || null,
+      }
+    });
+    window.dispatchEvent(new Event("engram-refresh"));
+  }
+
+  async function deleteBank(bankId) {
+    if (!window.confirm("Delete this bank and all its data?")) return;
+    await api(`/banks/${bankId}`, { method: "DELETE" });
+    if (selectedBank === bankId) setSelectedBank("");
+    window.dispatchEvent(new Event("engram-refresh"));
   }
 
   const counts = overview?.counts || {};
+  const currentBank = banks.find((b) => b.id === selectedBank);
 
   return (
     <main className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
@@ -146,16 +195,27 @@ function App() {
         <header className="topbar">
           <div className="hero-copy">
             <p className="eyebrow">Memory operations deck</p>
-            <h2>Structured memory control panel</h2>
+            <h2>{currentBank ? currentBank.name : "All Banks"}</h2>
             <p className="hero-note">
-              A control-room surface for memory state, live graph inspection, and tuning the intake pipeline.
+              {currentBank?.mission || "Structured memory control panel — select a bank to isolate its memory."}
             </p>
           </div>
           <div className="hero-summary">
             <div className="summary-card">
-              <span>Live pulse</span>
-              <strong>{overview?.neo4j?.configured ? "Neo4j connected" : "Local fallback"}</strong>
-              <small>{status}</small>
+              <span>Bank</span>
+              <select
+                className="bank-select"
+                value={selectedBank}
+                onChange={(e) => setSelectedBank(e.target.value)}
+              >
+                <option value="">All banks</option>
+                {banks.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.bank_type})
+                  </option>
+                ))}
+              </select>
+              <small>{banks.length} total</small>
             </div>
             <div className="summary-card">
               <span>Memory counts</span>
@@ -172,43 +232,50 @@ function App() {
 
         <section className="workspace-body">
           {activeTab === "overview" && (
-            <OverviewTab overview={overview} counts={counts} />
+            <OverviewTab overview={overview} counts={counts} banks={banks} currentBank={currentBank} onCreateBank={createBank} onDeleteBank={deleteBank} />
           )}
           {activeTab === "graph" && (
             <GraphTab graph={graph} selectedKind={selectedKind} setSelectedKind={setSelectedKind} />
           )}
           {activeTab === "sessions" && (
-            <SessionsTab sessions={sessions} banks={banks} />
-          )}
-          {activeTab === "banks" && (
-            <BanksTab banks={banks} />
-          )}
-          {activeTab === "buffers" && (
             <MemoryTab
-              title="Buffers"
-              subtitle="Pre-engram patterns with short, precise fields."
-              rows={memory.patterns}
-              columns={["pattern_hash", "strength", "occurrences", "threshold", "decay_rate"]}
+              title="Sessions"
+              subtitle="Sessions scoped to the selected bank."
+              rows={memory.sessions || []}
+              columns={["id", "current_mode", "task_context", "current_expectation", "created_at"]}
+            />
+          )}
+          {activeTab === "episodes" && (
+            <MemoryTab
+              title="Episodes"
+              subtitle="Completed experiences in the selected bank."
+              rows={memory.episodes || []}
+              columns={["id", "action", "context", "outcome", "created_at"]}
             />
           )}
           {activeTab === "engrams" && (
             <MemoryTab
               title="Engrams"
-              subtitle="Long-term memory indices."
-              rows={memory.engrams}
+              subtitle="Long-term memory indices in the selected bank."
+              rows={memory.engrams || []}
               columns={["id", "strength", "status", "access_count", "tags"]}
             />
           )}
           {activeTab === "schemas" && (
             <MemoryTab
               title="Schemas"
-              subtitle="Compressed patterns and predictions."
-              rows={memory.schemas}
+              subtitle="Compressed patterns and predictions in the selected bank."
+              rows={memory.schemas || []}
               columns={["id", "strength", "prediction_fields", "source_engram_ids"]}
             />
           )}
           {activeTab === "working-memory" && (
-            <WorkingMemoryTab entries={workingMemory} />
+            <MemoryTab
+              title="Working Memory"
+              subtitle="Short-lived memory entries in the selected bank."
+              rows={memory.workingMemory || []}
+              columns={["id", "content", "strength", "tags", "created_at"]}
+            />
           )}
           {activeTab === "thalamus" && (
             <ThalamusTab sim={sim} onSubmit={runThalamusPreview} onDeepSleep={consolidate} />
@@ -219,24 +286,23 @@ function App() {
           {activeTab === "performance" && (
             <PerformanceTab overview={overview} />
           )}
-          {activeTab === "experiments" && (
-            <ExperimentsTab />
-          )}
         </section>
       </section>
     </main>
   );
 }
 
-function OverviewTab({ overview, counts }) {
+function OverviewTab({ overview, counts, banks, currentBank, onCreateBank, onDeleteBank }) {
   const activeConfig = overview?.active_config || {};
   const thalamus = activeConfig.thalamus || {};
   const buffer = activeConfig.buffer || {};
   const retrieval = activeConfig.retrieval || {};
+  const [showCreate, setShowCreate] = useState(false);
+
   return (
     <div className="dashboard-grid overview-grid">
       <section className="panel subtle span-2">
-        <PanelTitle title="Snapshot" subtitle="Current memory load and operational posture." />
+        <PanelTitle title="Snapshot" subtitle={currentBank ? `Memory load for bank: ${currentBank.name}` : "Current memory load and operational posture."} />
         <div className="metric-grid">
           <Metric label="Sessions" value={counts.sessions} />
           <Metric label="Episodes" value={counts.episodes} />
@@ -291,6 +357,50 @@ function OverviewTab({ overview, counts }) {
           </div>
         )}
       </section>
+
+      <section className="panel subtle span-2">
+        <PanelTitle title="Memory Banks" subtitle="Active memory banks in the system." />
+        <div className="bank-grid">
+          {banks.length === 0 ? (
+            <div className="empty-state">No banks yet.</div>
+          ) : (
+            banks.map((bank) => (
+              <div key={bank.id} className="bank-card">
+                <div>
+                  <strong>{bank.name}</strong>
+                  <span className="badge">{bank.bank_type}</span>
+                  <small>{bank.memory_count} memories · {bank.schema_count} schemas · {bank.directive_count} directives</small>
+                </div>
+                <button className="secondary slim" type="button" onClick={() => onDeleteBank(bank.id)}>Delete</button>
+              </div>
+            ))
+          )}
+        </div>
+        <div style={{ marginTop: "16px" }}>
+          <button className="primary slim" type="button" onClick={() => setShowCreate((v) => !v)}>
+            {showCreate ? "Cancel" : "+ New Bank"}
+          </button>
+        </div>
+        {showCreate && (
+          <form className="lab-form" onSubmit={onCreateBank} style={{ marginTop: "12px" }}>
+            <input name="name" placeholder="Bank name" required />
+            <select name="bank_type" defaultValue="dictionary">
+              <option value="session">Session</option>
+              <option value="dictionary">Dictionary</option>
+              <option value="shared">Shared</option>
+            </select>
+            <textarea name="mission" placeholder="Mission statement" rows={2} />
+            <textarea name="directives" placeholder="Directives (one per line)" rows={3} />
+            <select name="parent_bank_id">
+              <option value="">No parent</option>
+              {banks.map((b) => (
+                <option key={b.id} value={b.id}>{b.name} ({b.bank_type})</option>
+              ))}
+            </select>
+            <button className="primary" type="submit">Create Bank</button>
+          </form>
+        )}
+      </section>
     </div>
   );
 }
@@ -299,7 +409,7 @@ function GraphTab({ graph, selectedKind, setSelectedKind }) {
   return (
     <div className="tab-stack">
       <section className="panel subtle">
-        <PanelTitle title="Memory graph" subtitle="Filtered graph projection." />
+        <PanelTitle title="Memory graph" subtitle="Filtered graph projection scoped to the selected bank." />
         <div className="filter-row">
           {[
             ["all", "all"],
@@ -410,16 +520,6 @@ function StatusCard({ title, body, accent = false }) {
       <span className="pulse" />
       <strong>{title}</strong>
       <small>{body}</small>
-    </div>
-  );
-}
-
-function QuickMetrics({ counts, mcp }) {
-  return (
-    <div className="quick-metrics">
-      <div><span>Sessions</span><strong>{counts.sessions ?? "—"}</strong></div>
-      <div><span>Episodes</span><strong>{counts.episodes ?? "—"}</strong></div>
-      <div><span>Neo4j</span><strong>{mcp?.http_enabled ? "on" : "off"}</strong></div>
     </div>
   );
 }
@@ -626,7 +726,7 @@ function MemoryGraph({ graph, selectedKind }) {
         </div>
         <div className="graph-actions">
           <span className="graph-zoom-readout">{Math.round(view.scale * 100)}%</span>
-          <button className="secondary slim" type="button" onClick={() => zoomTo(view.scale / 1.2)}>−</button>
+          <button className="secondary slim" type="button" onClick={() => zoomTo(view.scale / 1.2)}>-</button>
           <input
             className="graph-zoom-slider"
             type="range"
@@ -845,7 +945,7 @@ function ConfigEditor({ config, onSave, onReset }) {
     const next = structuredClone(draft);
     let cursor = next;
     for (const key of path.slice(0, -1)) cursor = cursor[key];
-    cursor[path.at(-1)] = path.at(-1) === "top_k" ? Number.parseInt(value, 10) : Number.parseFloat(value);
+    cursor[path.at(-1)] = path.at(-1) === "top_k" || path.at(-1) === "separation_search_candidates" || path.at(-1) === "max_content_length" ? Number.parseInt(value, 10) : Number.parseFloat(value);
     setDraft(next);
   }
 
@@ -921,7 +1021,7 @@ function ConfigEditor({ config, onSave, onReset }) {
     <div className="config-shell">
       <div className="config-presets">
         <span>Profiles:</span>
-        {["Conservative", "Balanced", "Exploratory", "Adaptive"].map(profile => (
+        {["Conservative", "Balanced", "Exploratory", "Adaptive"].map((profile) => (
           <button
             key={profile}
             className={`preset-btn ${activeProfile === profile ? "active" : ""}`}
@@ -981,6 +1081,33 @@ function ConfigEditor({ config, onSave, onReset }) {
   );
 }
 
+function PerformanceTab({ overview }) {
+  const counts = overview?.counts || {};
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Performance" subtitle="High-level operation metrics." />
+        <div className="metric-grid">
+          {Object.entries(counts).map(([key, value]) => (
+            <Metric key={key} label={key.replace(/_/g, " ")} value={value} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ExperimentsTab() {
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Experiments" subtitle="Coming soon." />
+        <div className="empty-state">No experiments running.</div>
+      </section>
+    </div>
+  );
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     method: options.method || "GET",
@@ -1006,25 +1133,23 @@ function labelForTab(tab) {
       ? "Graph"
       : tab === "sessions"
         ? "Sessions"
-        : tab === "banks"
-          ? "Banks"
-          : tab === "buffers"
-            ? "Buffers"
-            : tab === "engrams"
-              ? "Engrams"
-              : tab === "schemas"
-                ? "Schemas"
-                : tab === "working-memory"
-                  ? "Working Memory"
-                  : tab === "thalamus"
-                    ? "Thalamus"
-                    : tab === "tuning"
-                      ? "Tuning"
-                      : tab === "performance"
-                        ? "Performance"
-                        : tab === "experiments"
-                          ? "Experiments"
-                          : tab;
+      : tab === "episodes"
+        ? "Episodes"
+      : tab === "engrams"
+        ? "Engrams"
+      : tab === "schemas"
+        ? "Schemas"
+      : tab === "working-memory"
+        ? "Working Memory"
+      : tab === "thalamus"
+        ? "Thalamus"
+      : tab === "tuning"
+        ? "Tuning"
+      : tab === "performance"
+        ? "Performance"
+      : tab === "experiments"
+        ? "Experiments"
+      : tab;
 }
 
 function formatCell(value) {
@@ -1089,7 +1214,7 @@ function graphFields(node) {
       ["Thalamus novelty", formatNumber(thalamus.novelty)],
       ["Thalamus surprise", formatNumber(thalamus.surprise)],
       ["Thalamus relevance", formatNumber(thalamus.task_relevance)],
-      ["Thalamus valence", formatNumber(thalamus.emotional_valence)]
+      ["Thalamus valence", formatNumber(thalamus.valence)]
     ],
     schema: [
       ["Strength", formatNumber(props.strength)],
@@ -1186,261 +1311,5 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function SessionsTab({ sessions, banks }) {
-  return (
-    <div className="tab-stack">
-      <section className="panel subtle">
-        <PanelTitle title="Sessions" subtitle="Active and closed session history with bank context." />
-        {sessions.length === 0 ? (
-          <div className="empty-state">No sessions yet.</div>
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Session</th>
-                  <th>Mode</th>
-                  <th>Bank</th>
-                  <th>Expectation</th>
-                  <th>Created</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.slice(0, 30).map((session) => {
-                  const bank = banks.find(b => b.id === session.bank_id);
-                  return (
-                    <tr key={session.id}>
-                      <td>{shortId(session.id, 10)}</td>
-                      <td><span className="badge ok">{session.current_mode}</span></td>
-                      <td>{bank ? bank.name : "—"}</td>
-                      <td>{truncate(session.current_expectation, 40)}</td>
-                      <td>{formatDate(session.created_at)}</td>
-                      <td>{session.closed_at ? <span className="badge reject">closed</span> : <span className="badge ok">active</span>}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function BanksTab({ banks }) {
-  const [bankFilter, setBankFilter] = useState("all");
-  const [showCreate, setShowCreate] = useState(false);
-  const filtered = bankFilter === "all" ? banks : banks.filter(b => b.bank_type === bankFilter);
-
-  async function createBank(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const directives = (form.get("directives") || "").toString().split("\n").filter(s => s.trim());
-    await api("/banks", {
-      method: "POST",
-      body: {
-        name: form.get("name"),
-        bank_type: form.get("bank_type"),
-        mission: form.get("mission") || null,
-        directives,
-        disposition: { skepticism: 2, literalism: 2, empathy: 3, verbosity: 2 },
-        parent_bank_id: form.get("parent_bank_id") || null,
-      }
-    });
-    setShowCreate(false);
-    window.dispatchEvent(new Event("engram-refresh"));
-  }
-
-  return (
-    <div className="tab-stack">
-      <section className="panel subtle">
-        <PanelTitle title="Memory Banks" subtitle="Hierarchical, multi-tenant memory isolation layers." />
-        <div className="filter-row">
-          {["all", "session", "dictionary", "shared"].map(type => (
-            <button
-              key={type}
-              className={bankFilter === type ? "chip active" : "chip"}
-              onClick={() => setBankFilter(type)}
-            >
-              {type}
-            </button>
-          ))}
-          <button className="primary slim" type="button" onClick={() => setShowCreate(v => !v)}>
-            {showCreate ? "Cancel" : "+ New Bank"}
-          </button>
-        </div>
-
-        {showCreate && (
-          <form className="lab-form" onSubmit={createBank} style={{ marginTop: "12px" }}>
-            <input name="name" placeholder="Bank name" required />
-            <select name="bank_type" defaultValue="dictionary">
-              <option value="session">Session</option>
-              <option value="dictionary">Dictionary</option>
-              <option value="shared">Shared</option>
-            </select>
-            <textarea name="mission" placeholder="Mission statement (what knowledge to prioritize)" rows={2} />
-            <textarea name="directives" placeholder="Directives (one per line — hard rules to follow)" rows={3} />
-            <select name="parent_bank_id">
-              <option value="">No parent</option>
-              {banks.map(b => (
-                <option key={b.id} value={b.id}>{b.name} ({b.bank_type})</option>
-              ))}
-            </select>
-            <button className="primary" type="submit">Create Bank</button>
-          </form>
-        )}
-
-        <div className="bank-grid">
-          {filtered.length === 0 ? (
-            <div className="empty-state">No banks found.</div>
-          ) : (
-            filtered.map(bank => (
-              <BankCard key={bank.id} bank={bank} />
-            ))
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function BankCard({ bank }) {
-  return (
-    <div className="bank-card">
-      <div className="bank-card-header">
-        <h4>{bank.name}</h4>
-        <span className={`badge ${bank.bank_type === "shared" ? "accent" : "ok"}`}>{bank.bank_type}</span>
-      </div>
-      {bank.mission && <p className="bank-mission">{truncate(bank.mission, 80)}</p>}
-      <div className="bank-stats">
-        <div><span>Memories</span><strong>{bank.memory_count ?? "—"}</strong></div>
-        <div><span>Schemas</span><strong>{bank.schema_count ?? "—"}</strong></div>
-        <div><span>Directives</span><strong>{bank.directive_count ?? "—"}</strong></div>
-      </div>
-      {bank.parent_bank_id && (
-        <small className="bank-parent">Parent: {shortId(bank.parent_bank_id, 10)}</small>
-      )}
-    </div>
-  );
-}
-
-function WorkingMemoryTab({ entries }) {
-  return (
-    <div className="tab-stack">
-      <section className="panel subtle">
-        <PanelTitle title="Working Memory" subtitle="Pre-consolidation fragile memory entries." />
-        {entries.length === 0 ? (
-          <div className="empty-state">No working memory entries.</div>
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Content</th>
-                  <th>Strength</th>
-                  <th>Tags</th>
-                  <th>Session</th>
-                  <th>Decay Rate</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.slice(0, 30).map(entry => (
-                  <tr key={entry.id}>
-                    <td>{truncate(entry.content, 60)}</td>
-                    <td><strong>{formatNumber(entry.strength)}</strong></td>
-                    <td>{(entry.tags || []).slice(0, 3).join(", ")}</td>
-                    <td>{shortId(entry.session_id, 10)}</td>
-                    <td>{formatNumber(entry.decay_rate)}</td>
-                    <td>{formatDate(entry.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function PerformanceTab({ overview }) {
-  const activeConfig = overview?.active_config || {};
-  const thalamus = activeConfig.thalamus || {};
-  const buffer = activeConfig.buffer || {};
-  const pattern = activeConfig.pattern || {};
-  const retrieval = activeConfig.retrieval || {};
-  const scores = overview?.latest_scores || [];
-
-  const avgScore = scores.length > 0
-    ? (scores.reduce((sum, r) => sum + r.score, 0) / scores.length)
-    : 0;
-  const acceptanceRate = scores.length > 0
-    ? (scores.filter(r => r.accepted).length / scores.length * 100)
-    : 0;
-
-  return (
-    <div className="tab-stack">
-      <section className="panel subtle">
-        <PanelTitle title="Performance Metrics" subtitle="Intake pipeline efficiency and memory quality." />
-        <div className="metric-grid">
-          <Metric label="Avg Intake Score" value={formatNumber(avgScore)} />
-          <Metric label="Acceptance Rate" value={`${acceptanceRate.toFixed(1)}%`} />
-          <Metric label="Total Episodes" value={overview?.counts?.episodes ?? "—"} />
-          <Metric label="Active Engrams" value={overview?.counts?.engrams ?? "—"} />
-          <Metric label="Schema Count" value={overview?.counts?.schemas ?? "—"} />
-          <Metric label="Buffer Patterns" value={overview?.counts?.patterns ?? "—"} />
-        </div>
-      </section>
-
-      <section className="panel subtle">
-        <PanelTitle title="Score History" subtitle="Recent ingestion outcomes." />
-        {scores.length === 0 ? (
-          <div className="empty-state">No score history available.</div>
-        ) : (
-          <div className="score-list compact">
-            {scores.map((record) => (
-              <div className="score-row compact" key={record.id}>
-                <span className={record.accepted ? "badge ok" : "badge reject"}>{record.accepted ? "accepted" : "rejected"}</span>
-                <strong>{record.score.toFixed(3)}</strong>
-                <small>threshold: {record.threshold.toFixed(3)}</small>
-                <small>{formatDate(record.created_at)}</small>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="panel subtle">
-        <PanelTitle title="Tuning Profile" subtitle="Current configuration parameters." />
-        <div className="detail-grid">
-          <DetailItem label="Novelty Weight" value={formatNumber(thalamus.novelty_weight)} />
-          <DetailItem label="Surprise Weight" value={formatNumber(thalamus.surprise_weight)} />
-          <DetailItem label="Relevance Weight" value={formatNumber(thalamus.task_relevance_weight)} />
-          <DetailItem label="Valence Weight" value={formatNumber(thalamus.valence_weight)} />
-          <DetailItem label="Exploration Threshold" value={formatNumber(thalamus.exploration_threshold)} />
-          <DetailItem label="Completion Threshold" value={formatNumber(pattern.completion_threshold)} />
-          <DetailItem label="Buffer Similarity" value={formatNumber(buffer.similarity_threshold)} />
-          <DetailItem label="Retrieval Top K" value={retrieval.top_k ?? "—"} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ExperimentsTab() {
-  return (
-    <div className="tab-stack">
-      <section className="panel subtle">
-        <PanelTitle title="Experiments" subtitle="A/B test configurations and compare outcomes." />
-        <div className="empty-state">
-          Experiments runner coming soon. Compare baseline vs. experimental configs across sessions.
-        </div>
-      </section>
-    </div>
-  );
-}
-
-createRoot(document.getElementById("root")).render(<App />);
+const root = createRoot(document.getElementById("root"));
+root.render(<App />);

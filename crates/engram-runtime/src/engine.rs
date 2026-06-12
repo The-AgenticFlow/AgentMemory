@@ -268,7 +268,7 @@ impl MemorySystem {
         handle: &mut SessionHandle,
         task_id: impl Into<String>,
     ) -> Result<()> {
-        let context = WorkingContext::new(handle.session.id, task_id);
+        let context = WorkingContext::new(handle.session.id, handle.session.bank_id, task_id);
         self.postgres.save_working_context(&context).await?;
         if let Err(error) = self.neo4j.upsert_working_context(&context).await {
             tracing::warn!("Neo4j working-context sync failed: {error}");
@@ -478,11 +478,11 @@ impl MemorySystem {
         })
     }
 
-    pub async fn overview(&self) -> Result<RuntimeOverview> {
+    pub async fn overview(&self, bank_id: Option<uuid::Uuid>) -> Result<RuntimeOverview> {
         let mut latest_scores = self.postgres.list_ingestion_records().await?;
         latest_scores.truncate(12);
         Ok(RuntimeOverview {
-            counts: self.counts().await?,
+            counts: self.counts(bank_id).await?,
             latest_scores,
             active_config: self.runtime_config(),
             neo4j: self.neo4j.health().await,
@@ -498,7 +498,17 @@ impl MemorySystem {
         })
     }
 
-    pub async fn counts(&self) -> Result<MemoryCounts> {
+    pub async fn counts(&self, bank_id: Option<uuid::Uuid>) -> Result<MemoryCounts> {
+        if let Some(bank_id) = bank_id {
+            return Ok(MemoryCounts {
+                sessions: self.postgres.list_sessions_by_bank(bank_id).await?.len(),
+                working_contexts: self.postgres.list_working_contexts_by_bank(bank_id).await?.len(),
+                episodes: self.postgres.list_episodes_by_bank(bank_id).await?.len(),
+                patterns: self.qdrant.list_patterns_by_bank(bank_id).await?.len(),
+                engrams: self.qdrant.list_engrams_by_bank(bank_id).await?.len(),
+                schemas: self.postgres.list_schemas_by_bank(bank_id).await?.len(),
+            });
+        }
         Ok(MemoryCounts {
             sessions: self.postgres.list_sessions().await?.len(),
             working_contexts: self.postgres.list_working_contexts().await?.len(),
@@ -509,16 +519,43 @@ impl MemorySystem {
         })
     }
 
-    pub async fn control_graph(&self) -> Result<ControlGraph> {
-        let sessions = self.postgres.list_sessions().await?;
-        let contexts = self.postgres.list_working_contexts().await?;
-        let episodes = self.postgres.list_episodes().await?;
-        let patterns = self.qdrant.list_patterns().await?;
-        let engrams = self.qdrant.list_engrams().await?;
-        let schemas = self.postgres.list_schemas().await?;
+    pub async fn control_graph(&self, bank_id: Option<uuid::Uuid>) -> Result<ControlGraph> {
+        let sessions: Vec<engram_core::Session> = if let Some(bank_id) = bank_id {
+            self.postgres.list_sessions_by_bank(bank_id).await?
+        } else {
+            self.postgres.list_sessions().await?
+        };
+        let _session_ids: std::collections::HashSet<uuid::Uuid> = sessions.iter().map(|s| s.id).collect();
+        let _bank_ids: std::collections::HashSet<uuid::Uuid> = sessions.iter().filter_map(|s| s.bank_id).collect();
+
+        let contexts: Vec<engram_core::WorkingContext> = if let Some(bank_id) = bank_id {
+            self.postgres.list_working_contexts_by_bank(bank_id).await?
+        } else {
+            self.postgres.list_working_contexts().await?
+        };
+        let episodes: Vec<engram_core::Episode> = if let Some(bank_id) = bank_id {
+            self.postgres.list_episodes_by_bank(bank_id).await?
+        } else {
+            self.postgres.list_episodes().await?
+        };
+        let patterns: Vec<engram_core::PatternEntry> = if let Some(bank_id) = bank_id {
+            self.qdrant.list_patterns_by_bank(bank_id).await?
+        } else {
+            self.qdrant.list_patterns().await?
+        };
+        let engrams: Vec<engram_core::EngramEntry> = if let Some(bank_id) = bank_id {
+            self.qdrant.list_engrams_by_bank(bank_id).await?
+        } else {
+            self.qdrant.list_engrams().await?
+        };
+        let schemas: Vec<engram_core::MetaEngram> = if let Some(bank_id) = bank_id {
+            self.postgres.list_schemas_by_bank(bank_id).await?
+        } else {
+            self.postgres.list_schemas().await?
+        };
 
         let mut nodes = Vec::new();
-        let mut edges = Vec::new();
+        let mut candidate_edges = Vec::new();
         for session in sessions {
             nodes.push(ControlGraphNode {
                 id: session.id.to_string(),
@@ -536,7 +573,7 @@ impl MemorySystem {
                 title: context.task_id.clone(),
                 properties: serde_json::to_value(&context)?,
             });
-            edges.push(edge(context.session_id, context.id, "ACTIVATES"));
+            candidate_edges.push(edge(context.session_id, context.id, "ACTIVATES"));
         }
         for episode in episodes {
             nodes.push(ControlGraphNode {
@@ -546,7 +583,7 @@ impl MemorySystem {
                 title: episode.action.clone(),
                 properties: serde_json::to_value(&episode)?,
             });
-            edges.push(edge(episode.session_id, episode.id, "CAPTURED"));
+            candidate_edges.push(edge(episode.session_id, episode.id, "CAPTURED"));
         }
         for pattern in patterns {
             nodes.push(ControlGraphNode {
@@ -557,7 +594,7 @@ impl MemorySystem {
                 properties: serde_json::to_value(&pattern)?,
             });
             for episode_id in &pattern.episode_refs {
-                edges.push(ControlGraphEdge {
+                candidate_edges.push(ControlGraphEdge {
                     id: format!("{episode_id}:BUFFERED_AS:{}", pattern.pattern_hash),
                     source: episode_id.to_string(),
                     target: pattern.pattern_hash.clone(),
@@ -573,12 +610,12 @@ impl MemorySystem {
                 title: engram.tags.join(", "),
                 properties: serde_json::to_value(&engram)?,
             });
-            edges.push(edge(engram.session_ref, engram.id, "PROMOTED_TO"));
+            candidate_edges.push(edge(engram.session_ref, engram.id, "PROMOTED_TO"));
             if let Some(kinship) = engram.kinship_ref {
-                edges.push(edge(engram.id, kinship, "KINSHIP"));
+                candidate_edges.push(edge(engram.id, kinship, "KINSHIP"));
             }
             for schema_id in &engram.schema_refs {
-                edges.push(edge(engram.id, *schema_id, "SOURCE_OF"));
+                candidate_edges.push(edge(engram.id, *schema_id, "SOURCE_OF"));
             }
         }
         for schema in schemas {
@@ -590,9 +627,16 @@ impl MemorySystem {
                 properties: serde_json::to_value(&schema)?,
             });
             for engram_id in &schema.source_engram_ids {
-                edges.push(edge(*engram_id, schema.id, "SOURCE_OF"));
+                candidate_edges.push(edge(*engram_id, schema.id, "SOURCE_OF"));
             }
         }
+
+        // Only keep edges whose source and target both exist in the scoped node set.
+        let node_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+        let edges: Vec<ControlGraphEdge> = candidate_edges
+            .into_iter()
+            .filter(|e| node_ids.contains(&e.source) && node_ids.contains(&e.target))
+            .collect();
 
         Ok(ControlGraph { nodes, edges })
     }

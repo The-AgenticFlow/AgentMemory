@@ -134,7 +134,7 @@ impl Neo4jMemoryStore {
              SET w.task_id = $task_id, w.goal_stack = $goal_stack, w.active_engrams = $active_engrams,
                  w.episodic_buffer = $episodic_buffer, w.inference_layer = $inference_layer,
                  w.context_metadata = $context_metadata, w.opened_at = $opened_at,
-                 w.updated_at = $updated_at, w.closed_at = $closed_at
+                 w.updated_at = $updated_at, w.closed_at = $closed_at, w.bank_id = $bank_id
              MERGE (s)-[:ACTIVATES]->(w)",
             json!({
                 "id": context.id,
@@ -148,6 +148,7 @@ impl Neo4jMemoryStore {
                 "opened_at": context.opened_at,
                 "updated_at": context.updated_at,
                 "closed_at": context.closed_at,
+                "bank_id": context.bank_id.map(|id| id.to_string()),
             }),
         )
         .await

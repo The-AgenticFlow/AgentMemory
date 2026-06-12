@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put, delete};
@@ -125,6 +125,11 @@ pub struct ThalamusSimRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BankQuery {
+    pub bank_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ChatRequestBody {
     pub message: String,
     #[serde(default)]
@@ -233,14 +238,16 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
 pub async fn control_overview(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<engram_runtime::RuntimeOverview>> {
-    Ok(Json(state.system.overview().await.map_err(internal_error)?))
+    Ok(Json(state.system.overview(query.bank_id).await.map_err(internal_error)?))
 }
 
 pub async fn control_graph(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<engram_runtime::ControlGraph>> {
-    Ok(Json(state.system.control_graph().await.map_err(internal_error)?))
+    Ok(Json(state.system.control_graph(query.bank_id).await.map_err(internal_error)?))
 }
 
 pub async fn get_control_config(State(state): State<AppState>) -> Json<RuntimeConfig> {
@@ -291,63 +298,60 @@ pub async fn simulate_thalamus(
     Ok(Json(simulation))
 }
 
-pub async fn list_episodes(State(state): State<AppState>) -> ApiResult<Json<Vec<Episode>>> {
-    Ok(Json(
-        state
-            .system
-            .postgres
-            .list_episodes()
-            .await
-            .map_err(internal_error)?,
-    ))
+pub async fn list_episodes(
+    State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
+) -> ApiResult<Json<Vec<Episode>>> {
+    let episodes = if let Some(bank_id) = query.bank_id {
+        state.system.postgres.list_episodes_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.postgres.list_episodes().await.map_err(internal_error)?
+    };
+    Ok(Json(episodes))
 }
 
 pub async fn list_patterns(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<Vec<engram_core::PatternEntry>>> {
-    Ok(Json(
-        state
-            .system
-            .qdrant
-            .list_patterns()
-            .await
-            .map_err(internal_error)?,
-    ))
+    let patterns = if let Some(bank_id) = query.bank_id {
+        state.system.qdrant.list_patterns_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.qdrant.list_patterns().await.map_err(internal_error)?
+    };
+    Ok(Json(patterns))
 }
 
 pub async fn list_engrams(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<Vec<engram_core::EngramEntry>>> {
-    Ok(Json(
-        state
-            .system
-            .qdrant
-            .list_engrams()
-            .await
-            .map_err(internal_error)?,
-    ))
+    let engrams = if let Some(bank_id) = query.bank_id {
+        state.system.qdrant.list_engrams_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.qdrant.list_engrams().await.map_err(internal_error)?
+    };
+    Ok(Json(engrams))
 }
 
 pub async fn list_schemas(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<Vec<engram_core::MetaEngram>>> {
-    Ok(Json(
-        state
-            .system
-            .postgres
-            .list_schemas()
-            .await
-            .map_err(internal_error)?,
-    ))
+    let schemas = if let Some(bank_id) = query.bank_id {
+        state.system.postgres.list_schemas_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.postgres.list_schemas().await.map_err(internal_error)?
+    };
+    Ok(Json(schemas))
 }
 
-pub async fn list_sessions(State(state): State<AppState>) -> ApiResult<Json<Vec<SessionSummary>>> {
-    let sessions = state
-        .system
-        .postgres
-        .list_sessions()
-        .await
-        .map_err(internal_error)?;
+pub async fn list_sessions(State(state): State<AppState>, Query(query): Query<BankQuery>) -> ApiResult<Json<Vec<SessionSummary>>> {
+    let sessions = if let Some(bank_id) = query.bank_id {
+        state.system.postgres.list_sessions_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.postgres.list_sessions().await.map_err(internal_error)?
+    };
     let mut summaries = Vec::with_capacity(sessions.len());
 
     for session in sessions {
@@ -1089,13 +1093,13 @@ pub async fn list_bank_schemas(
 
 pub async fn list_working_memory(
     State(state): State<AppState>,
+    Query(query): Query<BankQuery>,
 ) -> ApiResult<Json<Vec<engram_core::WorkingMemoryEntry>>> {
-    let entries = state
-        .system
-        .postgres
-        .list_working_memory()
-        .await
-        .map_err(internal_error)?;
+    let entries = if let Some(bank_id) = query.bank_id {
+        state.system.postgres.list_working_memory_by_bank(bank_id).await.map_err(internal_error)?
+    } else {
+        state.system.postgres.list_working_memory().await.map_err(internal_error)?
+    };
     Ok(Json(entries))
 }
 

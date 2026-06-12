@@ -102,6 +102,18 @@ impl PostgresMemoryStore {
         Ok(episodes)
     }
 
+    /// Returns episodes scoped to a specific bank.
+    pub async fn list_episodes_by_bank(&self, bank_id: Uuid) -> Result<Vec<Episode>> {
+        let mut episodes: Vec<Episode> = self
+            .snapshot()
+            .episodes
+            .into_iter()
+            .filter(|e| e.bank_id == Some(bank_id))
+            .collect();
+        episodes.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(episodes)
+    }
+
     /// Persists one raw episode record for dashboard inspection.
     pub async fn save_episode(&self, episode: &Episode) -> Result<()> {
         let mut snapshot = self.snapshot();
@@ -175,6 +187,17 @@ impl PostgresMemoryStore {
     /// Returns all working contexts.
     pub async fn list_working_contexts(&self) -> Result<Vec<WorkingContext>> {
         Ok(self.snapshot().working_contexts)
+    }
+
+    /// Returns working contexts scoped to a specific bank.
+    pub async fn list_working_contexts_by_bank(&self, bank_id: Uuid) -> Result<Vec<WorkingContext>> {
+        let contexts: Vec<WorkingContext> = self
+            .snapshot()
+            .working_contexts
+            .into_iter()
+            .filter(|c| c.bank_id == Some(bank_id))
+            .collect();
+        Ok(contexts)
     }
 
     /// Reads the persisted runtime configuration JSON, if present.
@@ -353,6 +376,15 @@ impl PostgresMemoryStore {
             .working_memory
             .into_iter()
             .filter(|e| e.session_id == session_id)
+            .collect())
+    }
+
+    pub async fn list_working_memory_by_bank(&self, bank_id: Uuid) -> Result<Vec<WorkingMemoryEntry>> {
+        Ok(self
+            .snapshot()
+            .working_memory
+            .into_iter()
+            .filter(|e| e.bank_id == Some(bank_id))
             .collect())
     }
 

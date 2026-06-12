@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use engram_core::{EngramEntry, PatternEntry};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::Scored;
 
@@ -53,9 +54,31 @@ impl QdrantMemoryStore {
         Ok(self.snapshot().engrams)
     }
 
+    /// Returns engrams scoped to a specific bank.
+    pub async fn list_engrams_by_bank(&self, bank_id: Uuid) -> Result<Vec<EngramEntry>> {
+        let engrams: Vec<EngramEntry> = self
+            .snapshot()
+            .engrams
+            .into_iter()
+            .filter(|e| e.bank_id == Some(bank_id))
+            .collect();
+        Ok(engrams)
+    }
+
     /// Returns all buffered patterns.
     pub async fn list_patterns(&self) -> Result<Vec<PatternEntry>> {
         Ok(self.snapshot().patterns)
+    }
+
+    /// Returns patterns scoped to a specific bank.
+    pub async fn list_patterns_by_bank(&self, bank_id: Uuid) -> Result<Vec<PatternEntry>> {
+        let patterns: Vec<PatternEntry> = self
+            .snapshot()
+            .patterns
+            .into_iter()
+            .filter(|p| p.bank_id == Some(bank_id))
+            .collect();
+        Ok(patterns)
     }
 
     /// Searches for nearby engrams in the vector index.
@@ -80,7 +103,7 @@ impl QdrantMemoryStore {
     }
 
     /// Returns one engram by id if it exists.
-    pub async fn get_engram(&self, id: uuid::Uuid) -> Result<Option<EngramEntry>> {
+    pub async fn get_engram(&self, id: Uuid) -> Result<Option<EngramEntry>> {
         Ok(self.snapshot().engrams.into_iter().find(|engram| engram.id == id))
     }
 

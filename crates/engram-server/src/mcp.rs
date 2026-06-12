@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use axum::{extract::State, Json};
-use engram_core::{SessionMode, WorkingContext};
+use engram_core::{BankType, DispositionConfig, MemoryBank, SessionMode, WorkingContext};
 use engram_runtime::{RetrievalOutcome, RuntimeConfig, SessionHandle};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -91,15 +91,44 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             let expectation = string_arg(&args, "expectation", "remember useful context");
             let task_context = string_arg(&args, "task_context", "agent task");
             let mode = parse_mode(args.get("mode").and_then(Value::as_str).unwrap_or("Exploration"))?;
+            let bank_id = args.get("bank_id").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok());
             let handle = state
                 .system
-                .open_session(None, None, expectation, mode, task_context)
+                .open_session(None, bank_id, expectation, mode, task_context)
                 .await
                 .map_err(internal)?;
             state.sessions.write().await.insert(handle.session.id, handle.clone());
             serde_json::to_value(handle).map_err(internal)?
         }
-        "memory_capture_episode" => {
+        "memory_close_session" => {
+            let session_id = uuid_arg(&args, "session_id")?;
+            let mut handle = if let Some(h) = state.sessions.write().await.remove(&session_id) {
+                h
+            } else {
+                let session = state.system.postgres.get_session(session_id).await.map_err(internal)?
+                    .ok_or_else(|| (-32004, format!("session not found: {session_id}")))?;
+                let ctx = state.system.postgres.get_working_context(session_id).await.map_err(internal)?;
+                SessionHandle { session, working_context: ctx }
+            };
+            state.system.close_session(&mut handle).await.map_err(internal)?;
+            json!({ "closed": true, "session_id": session_id })
+        }
+        "memory_create_bank" => {
+            let bank_name = string_arg(&args, "name", "new-bank");
+            let bank_type = parse_bank_type(args.get("type").and_then(Value::as_str).unwrap_or("dictionary"))?;
+            let mission = args.get("mission").and_then(Value::as_str).map(|s| s.to_string());
+            let directives: Vec<String> = args
+                .get("directives")
+                .and_then(Value::as_array)
+                .map(|arr| arr.iter().filter_map(Value::as_str).map(|s| s.to_string()).collect())
+                .unwrap_or_default();
+            let parent_bank_id = args.get("parent_bank_id").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok());
+            let disposition = DispositionConfig::default();
+            let bank = MemoryBank::new(bank_name, None, bank_type, mission, directives, disposition, parent_bank_id);
+            state.system.postgres.save_bank(&bank).await.map_err(internal)?;
+            serde_json::to_value(bank).map_err(internal)?
+        }
+        "memory_retain" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let mut handle = load_handle(state, session_id).await?;
             let outcome = state
@@ -115,7 +144,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(outcome).map_err(internal)?
         }
-        "memory_retrieve" => {
+        "memory_recall" => {
             let session_id = uuid_arg(&args, "session_id")?;
             let handle = load_handle(state, session_id).await?;
             let retrieval: RetrievalOutcome = state
@@ -126,7 +155,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(retrieval).map_err(internal)?
         }
-        "memory_consolidate" => {
+        "memory_reflect" => {
             let schemas = state.system.consolidate().await.map_err(internal)?;
             json!({ "created_schemas": schemas.len(), "schemas": schemas })
         }
@@ -234,19 +263,71 @@ async fn get_prompt(params: Value) -> Result<Value, (i64, String)> {
 }
 
 fn tools() -> Vec<Value> {
-    [
-        ("memory_open_session", "Open a memory session"),
-        ("memory_capture_episode", "Capture one action/context/outcome episode"),
-        ("memory_retrieve", "Retrieve structured memories for a query"),
-        ("memory_consolidate", "Run consolidation and schema generation"),
-        ("memory_get_working_context", "Read the active working context"),
-        ("memory_update_working_context", "Open/update a working context"),
-        ("memory_get_config", "Read runtime behavior config"),
-        ("memory_update_config", "Update runtime behavior config"),
+    vec![
+        json!({
+            "name": "memory_open_session",
+            "description": "Open a memory session. Optionally pass bank_id to target a specific memory bank.",
+            "inputSchema": { "type": "object", "properties": {
+                "expectation": { "type": "string" },
+                "task_context": { "type": "string" },
+                "mode": { "type": "string", "enum": ["Exploration", "Routine", "Critical", "Analogy", "Validation"] },
+                "bank_id": { "type": "string" }
+            }}
+        }),
+        json!({
+            "name": "memory_close_session",
+            "description": "Close an active memory session and persist its state.",
+            "inputSchema": { "type": "object", "properties": {
+                "session_id": { "type": "string" }
+            }, "required": ["session_id"] }
+        }),
+        json!({
+            "name": "memory_retain",
+            "description": "Retain one action/context/outcome episode (Cogniti alias for capture_episode).",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_recall",
+            "description": "Recall structured memories for a query (Cogniti alias for retrieve).",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_reflect",
+            "description": "Run reflection/consolidation and schema generation (Cogniti alias for consolidate).",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_get_working_context",
+            "description": "Read the active working context",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_update_working_context",
+            "description": "Open/update a working context",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_get_config",
+            "description": "Read runtime behavior config",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_update_config",
+            "description": "Update runtime behavior config",
+            "inputSchema": { "type": "object" }
+        }),
+        json!({
+            "name": "memory_create_bank",
+            "description": "Create a new hierarchical memory bank for isolated agent memory.",
+            "inputSchema": { "type": "object", "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string", "enum": ["session", "dictionary", "shared"] },
+                "mission": { "type": "string" },
+                "directives": { "type": "array", "items": { "type": "string" } },
+                "parent_bank_id": { "type": "string" }
+            }, "required": ["name", "type"] }
+        }),
     ]
-    .into_iter()
-    .map(|(name, description)| json!({ "name": name, "description": description, "inputSchema": { "type": "object" } }))
-    .collect()
 }
 
 fn resources() -> Vec<Value> {
@@ -301,7 +382,18 @@ fn parse_mode(value: &str) -> Result<SessionMode, (i64, String)> {
         "exploration" => Ok(SessionMode::Exploration),
         "routine" => Ok(SessionMode::Routine),
         "critical" => Ok(SessionMode::Critical),
+        "analogy" => Ok(SessionMode::Analogy),
+        "validation" => Ok(SessionMode::Validation),
         other => Err((-32602, format!("unknown session mode: {other}"))),
+    }
+}
+
+fn parse_bank_type(value: &str) -> Result<BankType, (i64, String)> {
+    match value.to_ascii_lowercase().as_str() {
+        "session" => Ok(BankType::Session),
+        "dictionary" => Ok(BankType::Dictionary),
+        "shared" => Ok(BankType::Shared),
+        other => Err((-32602, format!("unknown bank type: {other}"))),
     }
 }
 

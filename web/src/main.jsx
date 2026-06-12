@@ -48,7 +48,12 @@ function App() {
   useEffect(() => {
     refresh().catch((error) => setStatus(error.message));
     const timer = window.setInterval(() => refresh().catch((error) => setStatus(error.message)), 15000);
-    return () => window.clearInterval(timer);
+    const handleRefresh = () => refresh().catch((error) => setStatus(error.message));
+    window.addEventListener("engram-refresh", handleRefresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("engram-refresh", handleRefresh);
+    };
   }, []);
 
   async function saveConfig(nextConfig) {
@@ -1226,7 +1231,27 @@ function SessionsTab({ sessions, banks }) {
 
 function BanksTab({ banks }) {
   const [bankFilter, setBankFilter] = useState("all");
+  const [showCreate, setShowCreate] = useState(false);
   const filtered = bankFilter === "all" ? banks : banks.filter(b => b.bank_type === bankFilter);
+
+  async function createBank(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const directives = (form.get("directives") || "").toString().split("\n").filter(s => s.trim());
+    await api("/banks", {
+      method: "POST",
+      body: {
+        name: form.get("name"),
+        bank_type: form.get("bank_type"),
+        mission: form.get("mission") || null,
+        directives,
+        disposition: { skepticism: 2, literalism: 2, empathy: 3, verbosity: 2 },
+        parent_bank_id: form.get("parent_bank_id") || null,
+      }
+    });
+    setShowCreate(false);
+    window.dispatchEvent(new Event("engram-refresh"));
+  }
 
   return (
     <div className="tab-stack">
@@ -1242,7 +1267,31 @@ function BanksTab({ banks }) {
               {type}
             </button>
           ))}
+          <button className="primary slim" type="button" onClick={() => setShowCreate(v => !v)}>
+            {showCreate ? "Cancel" : "+ New Bank"}
+          </button>
         </div>
+
+        {showCreate && (
+          <form className="lab-form" onSubmit={createBank} style={{ marginTop: "12px" }}>
+            <input name="name" placeholder="Bank name" required />
+            <select name="bank_type" defaultValue="dictionary">
+              <option value="session">Session</option>
+              <option value="dictionary">Dictionary</option>
+              <option value="shared">Shared</option>
+            </select>
+            <textarea name="mission" placeholder="Mission statement (what knowledge to prioritize)" rows={2} />
+            <textarea name="directives" placeholder="Directives (one per line — hard rules to follow)" rows={3} />
+            <select name="parent_bank_id">
+              <option value="">No parent</option>
+              {banks.map(b => (
+                <option key={b.id} value={b.id}>{b.name} ({b.bank_type})</option>
+              ))}
+            </select>
+            <button className="primary" type="submit">Create Bank</button>
+          </form>
+        )}
+
         <div className="bank-grid">
           {filtered.length === 0 ? (
             <div className="empty-state">No banks found.</div>

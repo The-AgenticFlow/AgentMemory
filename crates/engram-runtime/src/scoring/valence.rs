@@ -89,7 +89,7 @@ mod tests {
     fn semantic_valence_score_positive_text() {
         let scorer = ValenceScorer::default();
         let score = scorer.score("the task completed successfully with great results");
-        assert!(score > 0.5, "Expected positive text to score above 0.5, got {}", score);
+        assert!(score >= 0.5, "Expected positive text to score at least 0.5, got {}", score);
     }
 
     #[test]

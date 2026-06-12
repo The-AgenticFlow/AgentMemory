@@ -181,6 +181,7 @@ mod tests {
                 tags: vec!["tag".into()],
                 strength: 0.8,
                 source_engram_ids: vec![],
+                bank_id: None,
                 prediction_fields: vec!["tag".into()],
                 created_at: chrono::Utc::now(),
             }),

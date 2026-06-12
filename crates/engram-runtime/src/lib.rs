@@ -13,12 +13,13 @@ pub mod engine;
 pub mod flows;
 pub mod nodes;
 pub mod plasticity;
+pub mod retrieval;
 pub mod scoring;
 pub mod stc;
 pub mod types;
 
 pub use config::{
-    AdaptiveConfig, BufferConfig, ConsolidationConfig, FusionStrategy, PatternConfig,
+    AdaptiveConfig, BufferConfig, ConsolidationConfig, PatternConfig,
     PlasticityConfig, RetrievalConfig, RuntimeConfig, TaskRelevanceMode, ThalamusConfig,
     TuningProfile,
 };

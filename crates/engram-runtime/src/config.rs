@@ -330,6 +330,26 @@ impl Default for RuntimeConfig {
     }
 }
 
+impl Default for ThalamusConfig {
+    fn default() -> Self {
+        Self {
+            novelty_weight: 0.25,
+            surprise_weight: 0.25,
+            task_relevance_weight: 0.25,
+            valence_weight: 0.25,
+            exploration_threshold: 0.35,
+            routine_threshold: 0.55,
+            critical_threshold: 0.0,
+            analogy_threshold: 0.3,
+            validation_threshold: 0.6,
+            use_semantic_valence: false,
+            valence_positive_anchors: Vec::new(),
+            valence_negative_anchors: Vec::new(),
+            task_relevance_mode: TaskRelevanceMode::TokenOverlap,
+        }
+    }
+}
+
 impl Default for PlasticityConfig {
     fn default() -> Self {
         Self {

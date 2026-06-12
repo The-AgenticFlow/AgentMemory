@@ -191,6 +191,7 @@ impl NightlyConsolidationNode {
             };
 
             postgres.save_schema(&schema).await?;
+            postgres.propagate_schema(&schema).await?;
             created.push(schema);
         }
 

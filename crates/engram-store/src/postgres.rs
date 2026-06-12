@@ -312,6 +312,23 @@ impl PostgresMemoryStore {
             .collect())
     }
 
+    /// Propagates a schema up the bank hierarchy (child → parent → ...).
+    pub async fn propagate_schema(&self, schema: &MetaEngram) -> Result<()> {
+        let mut current_bank_id = schema.bank_id;
+        let mut current_schema = schema.clone();
+        while let Some(bank_id) = current_bank_id {
+            let maybe_bank = self.get_bank(bank_id).await?;
+            let parent_id = maybe_bank.and_then(|b| b.parent_bank_id);
+            if let Some(parent) = parent_id {
+                current_schema.id = Uuid::new_v4();
+                current_schema.bank_id = Some(parent);
+                self.save_schema(&current_schema).await?;
+            }
+            current_bank_id = parent_id;
+        }
+        Ok(())
+    }
+
     // ── Working Memory ──────────────────────────────────────────
 
     pub async fn save_working_memory(&self, entry: &WorkingMemoryEntry) -> Result<()> {

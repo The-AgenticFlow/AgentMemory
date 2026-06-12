@@ -6,13 +6,14 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use engram_core::{MetaEngram, Session};
+use engram_core::{EngramEntry, MetaEngram, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
 use crate::adaptive::AdaptiveThresholdState;
-use crate::config::RetrievalConfig;
+use crate::config::{RetrievalConfig, FusionStrategy};
 use crate::embeddings::{cosine_similarity, embed_text};
 use crate::nodes::schema::SchemaActivationNode;
+use crate::retrieval::{Bm25Params, Bm25Retrieval, TemporalParams, TemporalRetrieval, RetrievalFusion};
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
 
 /// Top-level retrieval node that performs schema-guided search.
@@ -32,6 +33,12 @@ pub struct RetrievalArchitectureNode {
     pub schema_bonus_weight: f32,
     /// Maximum content length to include in facts.
     pub max_content_length: usize,
+    /// Enable temporal retrieval.
+    pub use_temporal_search: bool,
+    /// Enable BM25 keyword retrieval.
+    pub use_bm25_search: bool,
+    /// Strategy for merging multi-source results.
+    pub fusion_strategy: FusionStrategy,
 }
 
 impl Default for RetrievalArchitectureNode {
@@ -54,6 +61,9 @@ impl Default for RetrievalArchitectureNode {
             keyword_content_weight: 0.05,
             schema_bonus_weight: 0.04,
             max_content_length: 300,
+            use_temporal_search: false,
+            use_bm25_search: false,
+            fusion_strategy: FusionStrategy::ReciprocalRank,
         }
     }
 }
@@ -67,6 +77,9 @@ impl RetrievalArchitectureNode {
         self.keyword_content_weight = config.keyword_content_weight;
         self.schema_bonus_weight = config.schema_bonus_weight;
         self.max_content_length = config.max_content_length;
+        self.use_temporal_search = config.use_temporal_search;
+        self.use_bm25_search = config.use_bm25_search;
+        self.fusion_strategy = config.fusion_strategy.clone();
         self
     }
 
@@ -94,26 +107,57 @@ impl RetrievalArchitectureNode {
         );
         let search_budget = adaptive.search_budget(self.top_k, session.current_mode);
 
-        let mut candidates: Vec<RetrievalCandidate> = qdrant
+        // Strategy 1: Semantic search (always)
+        let semantic_results: HashMap<uuid::Uuid, (EngramEntry, f32)> = qdrant
             .search_engrams(&query_embedding, search_budget)
             .await?
             .into_iter()
             .map(|candidate: Scored<_>| {
                 let tags = candidate.item.tags.clone();
-                let engram = candidate.item;
-                RetrievalCandidate {
-                    similarity: self.adjust_similarity(
-                        candidate.similarity,
-                        &query,
-                        &tags,
-                        schema.as_ref(),
-                        retrieval_mode,
-                    ),
-                    engram,
-                }
+                let engram = candidate.item.clone();
+                let similarity = self.adjust_similarity(
+                    candidate.similarity,
+                    &query,
+                    &tags,
+                    schema.as_ref(),
+                    retrieval_mode,
+                );
+                (candidate.item.id, (engram, similarity))
             })
-            .collect::<Vec<_>>();
+            .collect();
 
+        // Strategy 2: BM25 keyword search (optional)
+        let bm25_results: HashMap<uuid::Uuid, (EngramEntry, f32)> = if self.use_bm25_search {
+            self.run_bm25(&query, qdrant).await?
+        } else {
+            HashMap::new()
+        };
+
+        // Strategy 3: Temporal search (optional)
+        let temporal_results: HashMap<uuid::Uuid, (EngramEntry, f32)> = if self.use_temporal_search {
+            self.run_temporal(qdrant).await?
+        } else {
+            HashMap::new()
+        };
+
+        // Fuse results if multi-strategy is enabled
+        let mut candidates: Vec<RetrievalCandidate> = if self.use_bm25_search || self.use_temporal_search {
+            let fused = RetrievalFusion::fuse(
+                self.fusion_strategy.clone(),
+                vec![semantic_results, bm25_results, temporal_results],
+            );
+            fused.into_iter().map(|item| RetrievalCandidate {
+                engram: item.engram,
+                similarity: item.score.clamp(0.0, 1.0),
+            }).collect()
+        } else {
+            semantic_results.into_iter().map(|(_, (engram, score))| RetrievalCandidate {
+                engram,
+                similarity: score,
+            }).collect()
+        };
+
+        // Kinship spread
         let mut spread_candidates = Vec::new();
         for candidate in &candidates {
             if let Some(kinship_ref) = candidate.engram.kinship_ref {
@@ -158,6 +202,54 @@ impl RetrievalArchitectureNode {
             schema,
             knowledge,
         })
+    }
+
+    /// Builds BM25 scores over all engram tags and content.
+    async fn run_bm25(
+        &self,
+        query: &str,
+        qdrant: &QdrantMemoryStore,
+    ) -> Result<HashMap<uuid::Uuid, (EngramEntry, f32)>> {
+        let all_engrams = qdrant.list_engrams().await?;
+        let docs: Vec<Vec<String>> = all_engrams
+            .iter()
+            .map(|e| {
+                let mut tokens = e.tags.clone();
+                if let Some(ref content) = e.episodic_content_ref {
+                    tokens.extend(crate::retrieval::tokenize(content));
+                }
+                tokens
+            })
+            .collect();
+        let bm25 = Bm25Retrieval::build(docs, Bm25Params::default());
+        let query_terms = crate::retrieval::tokenize(query);
+        let scores = bm25.score(&query_terms);
+
+        let mut results: HashMap<uuid::Uuid, (EngramEntry, f32)> = HashMap::new();
+        for (idx, score) in scores {
+            let engram = all_engrams[idx].clone();
+            // Normalize BM25 score roughly into [0, 1] using a sigmoid-like transform
+            let normalized = (score / (1.0 + score.abs())).clamp(0.0, 1.0);
+            results.insert(engram.id, (engram, normalized));
+        }
+        Ok(results)
+    }
+
+    /// Builds temporal scores over all engrams.
+    async fn run_temporal(
+        &self,
+        qdrant: &QdrantMemoryStore,
+    ) -> Result<HashMap<uuid::Uuid, (EngramEntry, f32)>> {
+        let all_engrams = qdrant.list_engrams().await?;
+        let temporal = TemporalRetrieval::new(TemporalParams::default());
+        let rankings = temporal.rank(&all_engrams);
+
+        let mut results: HashMap<uuid::Uuid, (EngramEntry, f32)> = HashMap::new();
+        for (idx, score) in rankings {
+            let engram = all_engrams[idx].clone();
+            results.insert(engram.id, (engram, score));
+        }
+        Ok(results)
     }
 
     /// Adjusts retrieval behavior based on the active mode.

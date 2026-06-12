@@ -7,6 +7,7 @@ async fn pipeline_can_ingest_and_retrieve_a_memory() {
     let mut handle = system
         .open_session(
             None,
+            None,
             "remember research preferences",
             SessionMode::Exploration,
             "research assistant task",

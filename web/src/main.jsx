@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const emptyMemory = { episodes: [], patterns: [], engrams: [], schemas: [] };
-const tabs = ["overview", "graph", "sessions", "banks", "buffers", "engrams", "schemas", "working-memory", "thalamus", "tuning", "performance"];
+const tabs = ["overview", "graph", "sessions", "banks", "buffers", "engrams", "schemas", "working-memory", "thalamus", "tuning", "performance", "experiments"];
 const graphKindOrder = ["session", "working_context", "episode", "pattern", "engram", "schema"];
 const graphCanvas = { width: 1000, height: 700 };
 
@@ -213,6 +213,9 @@ function App() {
           )}
           {activeTab === "performance" && (
             <PerformanceTab overview={overview} />
+          )}
+          {activeTab === "experiments" && (
+            <ExperimentsTab />
           )}
         </section>
       </section>
@@ -432,14 +435,22 @@ function MemoryGraph({ graph, selectedKind }) {
   const [expanded, setExpanded] = useState(false);
   const [positions, setPositions] = useState({});
   const [dragging, setDragging] = useState(null);
+  const [panning, setPanning] = useState(null);
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const boardRef = useRef(null);
+  const viewTouchedRef = useRef(false);
+  const selectedKindRef = useRef(selectedKind);
 
   const layout = useMemo(() => {
     const filtered = selectedKind === "all" ? graph.nodes : graph.nodes.filter((node) => node.kind === selectedKind);
     const ids = new Set(filtered.map((node) => node.id));
     const edges = graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
-    const radius = Math.min(280, Math.max(180, 110 + filtered.length * 4));
-    const center = { x: graphCanvas.width / 2, y: graphCanvas.height / 2 };
+    const nodeSize = clamp(112 - filtered.length * 1.15, 56, 108);
+    const radius = filtered.length <= 1 ? 0 : Math.max(160, filtered.length * (nodeSize * 0.85 / Math.PI));
+    const stageSize = Math.ceil(Math.max(graphCanvas.width, graphCanvas.height, radius * 2 + nodeSize * 4));
+    const center = { x: stageSize / 2, y: stageSize / 2 };
 
     const nodes = filtered.map((node, index) => {
       const angle = filtered.length === 1 ? -Math.PI / 2 : (index / filtered.length) * Math.PI * 2 - Math.PI / 2;
@@ -450,8 +461,36 @@ function MemoryGraph({ graph, selectedKind }) {
       };
     });
 
-    return { nodes, edges, filtered };
+    return { nodes, edges, filtered, stageSize, nodeSize };
   }, [graph, positions, selectedKind]);
+
+  const fitView = useMemo(() => {
+    const width = viewportSize.width || graphCanvas.width;
+    const height = viewportSize.height || graphCanvas.height;
+    const scale = clamp(Math.min(width / layout.stageSize, height / layout.stageSize) * 0.92, 0.05, 1);
+    return {
+      scale,
+      x: (width - layout.stageSize * scale) / 2,
+      y: (height - layout.stageSize * scale) / 2
+    };
+  }, [layout.stageSize, viewportSize.height, viewportSize.width]);
+
+  useEffect(() => {
+    const element = boardRef.current;
+    if (!element) return;
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      setViewportSize({ width: rect.width, height: rect.height });
+    };
+    update();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(update);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   useEffect(() => {
     setPositions((current) => {
@@ -468,6 +507,19 @@ function MemoryGraph({ graph, selectedKind }) {
   }, [layout.filtered]);
 
   useEffect(() => {
+    if (selectedKindRef.current !== selectedKind) {
+      selectedKindRef.current = selectedKind;
+      viewTouchedRef.current = false;
+    }
+  }, [selectedKind]);
+
+  useEffect(() => {
+    if (!viewTouchedRef.current) {
+      setView(fitView);
+    }
+  }, [fitView]);
+
+  useEffect(() => {
     if (selectedNodeId && !layout.nodes.some((node) => node.id === selectedNodeId)) {
       setSelectedNodeId(layout.nodes[0]?.id || null);
     }
@@ -481,12 +533,12 @@ function MemoryGraph({ graph, selectedKind }) {
     function move(event) {
       const rect = boardRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const point = pointFromEvent(event, rect);
+      const point = pointFromEvent(event, rect, view);
       setPositions((current) => ({
         ...current,
         [dragging.id]: {
-          x: clamp(point.x - dragging.offsetX, 72, graphCanvas.width - 72),
-          y: clamp(point.y - dragging.offsetY, 44, graphCanvas.height - 44)
+          x: clamp(point.x - dragging.offsetX, 72, layout.stageSize - 72),
+          y: clamp(point.y - dragging.offsetY, 72, layout.stageSize - 72)
         }
       }));
     }
@@ -499,7 +551,53 @@ function MemoryGraph({ graph, selectedKind }) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
     };
-  }, [dragging]);
+  }, [dragging, layout.stageSize, view]);
+
+  useEffect(() => {
+    if (!panning) return;
+    function move(event) {
+      viewTouchedRef.current = true;
+      setView((current) => ({
+        ...current,
+        x: panning.startX + (event.clientX - panning.clientX),
+        y: panning.startY + (event.clientY - panning.clientY)
+      }));
+    }
+    function end() {
+      setPanning(null);
+    }
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+    };
+  }, [panning]);
+
+  function zoomTo(nextScale, anchor = { x: viewportSize.width / 2, y: viewportSize.height / 2 }) {
+    if (anchor.x == null || anchor.y == null) return;
+    viewTouchedRef.current = true;
+    setView((current) => {
+      const clampedScale = clamp(nextScale, 0.05, 2.75);
+      const contentX = (anchor.x - current.x) / current.scale;
+      const contentY = (anchor.y - current.y) / current.scale;
+      return {
+        scale: clampedScale,
+        x: anchor.x - contentX * clampedScale,
+        y: anchor.y - contentY * clampedScale
+      };
+    });
+  }
+
+  function fitGraph() {
+    viewTouchedRef.current = false;
+    setView(fitView);
+  }
+
+  function resetLayout() {
+    setPositions({});
+    fitGraph();
+  }
 
   const byId = useMemo(() => new Map(layout.nodes.map((node) => [node.id, node])), [layout.nodes]);
   const selectedNode = selectedNodeId ? byId.get(selectedNodeId) || null : null;
@@ -522,72 +620,133 @@ function MemoryGraph({ graph, selectedKind }) {
           <p>{layout.nodes.length} visible nodes, {layout.edges.length} visible edges.</p>
         </div>
         <div className="graph-actions">
-          <button className="secondary slim" type="button" onClick={() => setPositions({})}>Reset layout</button>
+          <span className="graph-zoom-readout">{Math.round(view.scale * 100)}%</span>
+          <button className="secondary slim" type="button" onClick={() => zoomTo(view.scale / 1.2)}>−</button>
+          <input
+            className="graph-zoom-slider"
+            type="range"
+            min="0.05"
+            max="2.75"
+            step="0.01"
+            value={view.scale}
+            onChange={(event) => zoomTo(Number.parseFloat(event.target.value))}
+            aria-label="Zoom graph"
+          />
+          <button className="secondary slim" type="button" onClick={fitGraph}>Fit</button>
+          <button className="secondary slim" type="button" onClick={() => zoomTo(view.scale * 1.2)}>+</button>
+          <button className="secondary slim" type="button" onClick={resetLayout}>Reset layout</button>
           <button className="secondary slim" type="button" onClick={() => setExpanded((value) => !value)}>
             {expanded ? "Collapse" : "Expand"}
           </button>
         </div>
       </div>
 
-      <div className="graph-body">
-        <div className="graph-board" ref={boardRef}>
-          <svg className="graph-links" viewBox={`0 0 ${graphCanvas.width} ${graphCanvas.height}`} aria-hidden="true">
-            {layout.edges.map((edge) => {
-              const source = byId.get(edge.source);
-              const target = byId.get(edge.target);
-              if (!source || !target) return null;
+      <div className={inspectorCollapsed ? "graph-body inspector-collapsed" : "graph-body"}>
+        <div
+          className={panning ? "graph-board panning" : "graph-board"}
+          ref={boardRef}
+          onPointerDown={(event) => {
+            if (event.target instanceof Element && event.target.closest(".graph-node")) return;
+            if (event.button !== 0) return;
+            viewTouchedRef.current = true;
+            setPanning({
+              clientX: event.clientX,
+              clientY: event.clientY,
+              startX: view.x,
+              startY: view.y
+            });
+          }}
+          onWheel={(event) => {
+            event.preventDefault();
+            const rect = boardRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const anchor = {
+              x: event.clientX - rect.left,
+              y: event.clientY - rect.top
+            };
+            const nextScale = event.deltaY > 0 ? view.scale / 1.08 : view.scale * 1.08;
+            zoomTo(nextScale, anchor);
+          }}
+        >
+          <div
+            className="graph-stage"
+            style={{
+              width: `${layout.stageSize}px`,
+              height: `${layout.stageSize}px`,
+              transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
+            }}
+          >
+            <svg className="graph-links" viewBox={`0 0 ${layout.stageSize} ${layout.stageSize}`} aria-hidden="true">
+              {layout.edges.map((edge) => {
+                const source = byId.get(edge.source);
+                const target = byId.get(edge.target);
+                if (!source || !target) return null;
+                return (
+                  <g key={edge.id} className="graph-edge-group">
+                    <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="graph-edge" />
+                    <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2} className="graph-edge-label">
+                      {edge.label}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+
+            {layout.nodes.map((node) => {
+              const isActive = node.id === selectedNodeId;
+              const compact = layout.nodeSize < 84;
               return (
-                <g key={edge.id} className="graph-edge-group">
-                  <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="graph-edge" />
-                  <text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2} className="graph-edge-label">
-                    {edge.label}
-                  </text>
-                </g>
+                <button
+                  key={node.id}
+                  type="button"
+                  className={isActive ? `graph-node ${node.kind} active${compact ? " compact" : ""}` : `graph-node ${node.kind}${compact ? " compact" : ""}`}
+                  style={{
+                    "--node-size": `${layout.nodeSize}px`,
+                    left: `${node.x}px`,
+                    top: `${node.y}px`
+                  }}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const rect = boardRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const point = pointFromEvent(event, rect, view);
+                    setSelectedNodeId(node.id);
+                    setDragging({
+                      id: node.id,
+                      offsetX: point.x - (positions[node.id]?.x ?? node.x),
+                      offsetY: point.y - (positions[node.id]?.y ?? node.y)
+                    });
+                  }}
+                  onClick={() => setSelectedNodeId(node.id)}
+                  aria-label={`${node.kind} ${node.title || node.id}`}
+                >
+                  <span className="graph-node-kind">{labelForKind(node.kind)}</span>
+                  <strong>{truncate(node.title || node.label, compact ? 18 : 24)}</strong>
+                  <small>{truncate(nodeDetailLine(node), compact ? 22 : 34)}</small>
+                  <em>{shortId(node.id)}</em>
+                </button>
               );
             })}
-          </svg>
-
-          {layout.nodes.map((node) => {
-            const isActive = node.id === selectedNodeId;
-            return (
-              <button
-                key={node.id}
-                type="button"
-                className={isActive ? `graph-node ${node.kind} active` : `graph-node ${node.kind}`}
-                style={{
-                  left: `${(node.x / graphCanvas.width) * 100}%`,
-                  top: `${(node.y / graphCanvas.height) * 100}%`
-                }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  const rect = boardRef.current?.getBoundingClientRect();
-                  if (!rect) return;
-                  const point = pointFromEvent(event, rect);
-                  setSelectedNodeId(node.id);
-                  setDragging({
-                    id: node.id,
-                    offsetX: point.x - (positions[node.id]?.x ?? node.x),
-                    offsetY: point.y - (positions[node.id]?.y ?? node.y)
-                  });
-                }}
-                onClick={() => setSelectedNodeId(node.id)}
-                aria-label={`${node.kind} ${node.title || node.id}`}
-              >
-                <span className="graph-node-kind">{labelForKind(node.kind)}</span>
-                <strong>{truncate(node.title || node.label, 40)}</strong>
-                <small>{nodeDetailLine(node)}</small>
-                <em>{shortId(node.id)}</em>
-              </button>
-            );
-          })}
+          </div>
         </div>
 
-        <aside className="graph-inspector">
+        <aside className={inspectorCollapsed ? "graph-inspector collapsed" : "graph-inspector"}>
           <div className="inspector-header">
-            <span>Inspector</span>
-            <strong>{selectedNode ? labelForKind(selectedNode.kind) : "No selection"}</strong>
+            <span>{inspectorCollapsed ? "Inspect" : "Inspector"}</span>
+            {!inspectorCollapsed && (
+              <strong>{selectedNode ? labelForKind(selectedNode.kind) : "No selection"}</strong>
+            )}
+            <button
+              className="secondary slim inspector-toggle"
+              type="button"
+              onClick={() => setInspectorCollapsed((value) => !value)}
+              aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+            >
+              {inspectorCollapsed ? "‹" : "›"}
+            </button>
           </div>
-          {selectedNode ? (
+          {!inspectorCollapsed && selectedNode ? (
             <div className="inspector-stack">
               <section className="inspector-card">
                 <h4>{selectedNode.title || selectedNode.label}</h4>
@@ -634,9 +793,9 @@ function MemoryGraph({ graph, selectedKind }) {
                 )}
               </section>
             </div>
-          ) : (
+          ) : !inspectorCollapsed ? (
             <div className="empty-state">Select a node to inspect its properties and connections.</div>
-          )}
+          ) : null}
         </aside>
       </div>
     </div>
@@ -858,7 +1017,9 @@ function labelForTab(tab) {
                       ? "Tuning"
                       : tab === "performance"
                         ? "Performance"
-                        : tab;
+                        : tab === "experiments"
+                          ? "Experiments"
+                          : tab;
 }
 
 function formatCell(value) {
@@ -1009,10 +1170,10 @@ function formatValue(value) {
   return String(value);
 }
 
-function pointFromEvent(event, rect) {
+function pointFromEvent(event, rect, view = { scale: 1, x: 0, y: 0 }) {
   return {
-    x: ((event.clientX - rect.left) / rect.width) * graphCanvas.width,
-    y: ((event.clientY - rect.top) / rect.height) * graphCanvas.height
+    x: (event.clientX - rect.left - view.x) / view.scale,
+    y: (event.clientY - rect.top - view.y) / view.scale
   };
 }
 
@@ -1214,6 +1375,19 @@ function PerformanceTab({ overview }) {
           <DetailItem label="Completion Threshold" value={formatNumber(pattern.completion_threshold)} />
           <DetailItem label="Buffer Similarity" value={formatNumber(buffer.similarity_threshold)} />
           <DetailItem label="Retrieval Top K" value={retrieval.top_k ?? "—"} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ExperimentsTab() {
+  return (
+    <div className="tab-stack">
+      <section className="panel subtle">
+        <PanelTitle title="Experiments" subtitle="A/B test configurations and compare outcomes." />
+        <div className="empty-state">
+          Experiments runner coming soon. Compare baseline vs. experimental configs across sessions.
         </div>
       </section>
     </div>

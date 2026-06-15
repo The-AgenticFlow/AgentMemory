@@ -187,6 +187,20 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
                 .map_err(internal)?;
             serde_json::to_value(config).map_err(internal)?
         }
+        "memory_get_bank" => {
+            if let Some(bank_id_str) = args.get("bank_id").and_then(Value::as_str) {
+                let bank_id = Uuid::parse_str(bank_id_str).map_err(internal)?;
+                let bank = state.system.postgres.get_bank(bank_id).await.map_err(internal)?
+                    .ok_or_else(|| (-32004, format!("bank not found: {bank_id}")))?;
+                serde_json::to_value(bank).map_err(internal)?
+            } else if let Some(bank_name) = args.get("name").and_then(Value::as_str) {
+                let bank = state.system.postgres.find_bank_by_name(bank_name).await.map_err(internal)?
+                    .ok_or_else(|| (-32004, format!("bank not found: {bank_name}")))?;
+                serde_json::to_value(bank).map_err(internal)?
+            } else {
+                return Err((-32602, "memory_get_bank requires either bank_id (uuid) or name (string)".to_string()));
+            }
+        }
         _ => return Err((-32602, format!("unknown tool: {name}"))),
     };
 
@@ -326,6 +340,14 @@ fn tools() -> Vec<Value> {
                 "directives": { "type": "array", "items": { "type": "string" } },
                 "parent_bank_id": { "type": "string" }
             }, "required": ["name", "type"] }
+        }),
+        json!({
+            "name": "memory_get_bank",
+            "description": "Get a memory bank by ID or name. Requires either bank_id (UUID string) or name.",
+            "inputSchema": { "type": "object", "properties": {
+                "bank_id": { "type": "string" },
+                "name": { "type": "string" }
+            } }
         }),
     ]
 }

@@ -71,9 +71,11 @@ select:focus-visible {
 
 /* Layout shell */
 .app-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+    display: grid;
+    grid-template-columns: var(--rail-w, 280px) 1fr;
+    min-height: 100vh;
+    background: var(--ui-navy-950);
+    color: var(--ui-white);
 }
 
 .app-shell.sidebar-collapsed {

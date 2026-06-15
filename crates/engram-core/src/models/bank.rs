@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The type of memory bank, determining its scope and sharing behavior.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
 pub enum BankType {
     /// Private episodic memory, short-lived (per session).
     #[default]
@@ -21,6 +21,24 @@ pub enum BankType {
     Dictionary,
     /// Cross-agent shared schemas and patterns.
     Shared,
+}
+
+impl<'de> Deserialize<'de> for BankType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_ascii_lowercase().as_str() {
+            "session" => Ok(BankType::Session),
+            "dictionary" => Ok(BankType::Dictionary),
+            "shared" => Ok(BankType::Shared),
+            _ => Err(serde::de::Error::custom(format!(
+                "invalid bank_type '{}'. expected 'session', 'dictionary', or 'shared'",
+                s
+            ))),
+        }
+    }
 }
 
 impl std::fmt::Display for BankType {

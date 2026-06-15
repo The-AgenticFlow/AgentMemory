@@ -114,6 +114,8 @@ function App() {
     await refresh(selectedBank);
   }
 
+  const [showCreateBank, setShowCreateBank] = useState(false);
+
   async function createBank(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -129,6 +131,7 @@ function App() {
         parent_bank_id: form.get("parent_bank_id") || null,
       }
     });
+    setShowCreateBank(false);
     window.dispatchEvent(new Event("engram-refresh"));
   }
 
@@ -160,6 +163,56 @@ function App() {
             {sidebarCollapsed ? "›" : "‹"}
           </button>
         </div>
+
+        <section className="bank-portal">
+          <div className="bank-portal-header">
+            <h2>Memory Banks</h2>
+          </div>
+          <select
+            className="bank-select-main"
+            value={selectedBank}
+            onChange={(e) => setSelectedBank(e.target.value)}
+          >
+            <option value="">All banks</option>
+            {banks.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name} ({b.bank_type})
+              </option>
+            ))}
+          </select>
+          {currentBank && (
+            <div className="bank-info">
+              <strong>{currentBank.name}</strong>
+              <span className="badge">{currentBank.bank_type}</span>
+              {currentBank.mission && <p>{currentBank.mission}</p>}
+              <small>{banks.length} total banks</small>
+            </div>
+          )}
+          <div className="bank-actions">
+            <button className="primary slim" type="button" onClick={() => setShowCreateBank((v) => !v)}>
+              + New Bank
+            </button>
+          </div>
+          {showCreateBank && (
+            <form className="lab-form compact" onSubmit={createBank} style={{ marginTop: "8px" }}>
+              <input name="name" placeholder="Bank name" required />
+              <select name="bank_type" defaultValue="dictionary">
+                <option value="session">Session</option>
+                <option value="dictionary">Dictionary</option>
+                <option value="shared">Shared</option>
+              </select>
+              <textarea name="mission" placeholder="Mission statement" rows={2} />
+              <textarea name="directives" placeholder="Directives (one per line)" rows={2} />
+              <select name="parent_bank_id">
+                <option value="">No parent</option>
+                {banks.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <button className="primary" type="submit">Create Bank</button>
+            </form>
+          )}
+        </section>
 
         <nav className="rail-nav" aria-label="Sections">
           {tabs.map((tab) => (
@@ -197,26 +250,10 @@ function App() {
             <p className="eyebrow">Memory operations deck</p>
             <h2>{currentBank ? currentBank.name : "All Banks"}</h2>
             <p className="hero-note">
-              {currentBank?.mission || "Structured memory control panel — select a bank to isolate its memory."}
+              {currentBank?.mission || "Select a memory bank from the left panel to isolate its memory."}
             </p>
           </div>
           <div className="hero-summary">
-            <div className="summary-card">
-              <span>Bank</span>
-              <select
-                className="bank-select"
-                value={selectedBank}
-                onChange={(e) => setSelectedBank(e.target.value)}
-              >
-                <option value="">All banks</option>
-                {banks.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({b.bank_type})
-                  </option>
-                ))}
-              </select>
-              <small>{banks.length} total</small>
-            </div>
             <div className="summary-card">
               <span>Memory counts</span>
               <strong>{counts.sessions ?? "—"} / {counts.episodes ?? "—"}</strong>

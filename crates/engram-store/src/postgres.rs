@@ -264,6 +264,14 @@ impl PostgresMemoryStore {
         Ok(self.snapshot().memory_banks.into_iter().find(|b| b.id == id))
     }
 
+    pub async fn find_bank_by_name(&self, name: &str) -> Result<Option<MemoryBank>> {
+        Ok(self
+            .snapshot()
+            .memory_banks
+            .into_iter()
+            .find(|b| b.name.eq_ignore_ascii_case(name)))
+    }
+
     pub async fn list_banks(&self) -> Result<Vec<MemoryBank>> {
         let mut banks = self.snapshot().memory_banks;
         banks.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));

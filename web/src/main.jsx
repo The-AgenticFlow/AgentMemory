@@ -109,13 +109,30 @@ function App() {
   }
 
   async function consolidate() {
-    setStatus("Consolidating");
-    await safeApi("/consolidate", null, { method: "POST", body: { debug: true } });
-    await refresh(selectedBank);
+    if (consolidating) return;
+    setConsolidating(true);
+    setConsolidateFlash("running");
+    setStatus("Deep sleep running…");
+    try {
+      const result = await safeApi("/consolidate", null, { method: "POST", body: { debug: true } });
+      await refresh(selectedBank);
+      const count = Array.isArray(result) ? result.length : 0;
+      setStatus(count > 0 ? `Deep sleep complete · ${count} schema(s) formed` : "Deep sleep complete");
+      setConsolidateFlash("success");
+      window.setTimeout(() => setConsolidateFlash(null), 2500);
+    } catch (error) {
+      setStatus(`Deep sleep failed: ${error.message}`);
+      setConsolidateFlash("error");
+      window.setTimeout(() => setConsolidateFlash(null), 4000);
+    } finally {
+      setConsolidating(false);
+    }
   }
 
   const [showCreateBank, setShowCreateBank] = useState(false);
   const [bankSearch, setBankSearch] = useState("");
+  const [consolidating, setConsolidating] = useState(false);
+  const [consolidateFlash, setConsolidateFlash] = useState(null);
 
   async function createBank(event) {
     event.preventDefault();
@@ -293,7 +310,7 @@ function App() {
 
         <section className="workspace-body">
           {activeTab === "overview" && (
-            <OverviewTab overview={overview} counts={counts} banks={banks} currentBank={currentBank} onOpenCreateModal={() => setShowCreateBank(true)} onDeleteBank={deleteBank} onSelectBank={setSelectedBank} />
+            <OverviewTab overview={overview} counts={counts} banks={banks} currentBank={currentBank} onOpenCreateModal={() => setShowCreateBank(true)} onDeleteBank={deleteBank} onSelectBank={setSelectedBank} onDeepSleep={consolidate} consolidating={consolidating} consolidateFlash={consolidateFlash} />
           )}
           {activeTab === "graph" && (
             <GraphTab graph={graph} selectedKind={selectedKind} setSelectedKind={setSelectedKind} />
@@ -339,7 +356,7 @@ function App() {
             />
           )}
           {activeTab === "thalamus" && (
-            <ThalamusTab sim={sim} onSubmit={runThalamusPreview} onDeepSleep={consolidate} />
+            <ThalamusTab sim={sim} onSubmit={runThalamusPreview} />
           )}
           {activeTab === "tuning" && config && (
             <TuningTab config={config} onSave={saveConfig} onReset={resetConfig} />
@@ -357,7 +374,7 @@ function App() {
   );
 }
 
-function OverviewTab({ overview, counts, banks, currentBank, onOpenCreateModal, onDeleteBank, onSelectBank }) {
+function OverviewTab({ overview, counts, banks, currentBank, onOpenCreateModal, onDeleteBank, onSelectBank, onDeepSleep, consolidating, consolidateFlash }) {
   const activeConfig = overview?.active_config || {};
   const thalamus = activeConfig.thalamus || {};
   const buffer = activeConfig.buffer || {};
@@ -421,6 +438,44 @@ function OverviewTab({ overview, counts, banks, currentBank, onOpenCreateModal, 
             ))}
           </div>
         )}
+      </section>
+
+      <section className="panel subtle action-panel">
+        <PanelTitle title="Memory Maintenance" subtitle="Run overnight consolidation to decay weak memories, clean buffers, and form schemas." />
+        <div className="action-row">
+          <button
+            className={
+              consolidateFlash === "success"
+                ? "primary slim flash-success"
+                : consolidateFlash === "error"
+                  ? "primary slim flash-error"
+                  : consolidating
+                    ? "primary slim consolidating"
+                    : "primary slim"
+            }
+            type="button"
+            onClick={onDeepSleep}
+            disabled={consolidating}
+            aria-busy={consolidating}
+          >
+            {consolidating ? (
+              <span className="btn-inner">
+                <span className="spinner" /> Consolidating…
+              </span>
+            ) : consolidateFlash === "success" ? (
+              <span className="btn-inner">Done</span>
+            ) : consolidateFlash === "error" ? (
+              <span className="btn-inner">Failed</span>
+            ) : (
+              <span className="btn-inner">Deep sleep</span>
+            )}
+          </button>
+          <span className="action-hint">
+            {consolidating
+              ? "Decaying engrams, expiring working memory, compressing schemas…"
+              : "Decay weak patterns, expire working memory, and compress schemas."}
+          </span>
+        </div>
       </section>
 
       <section className="panel subtle span-2">
@@ -533,14 +588,15 @@ function TuningTab({ config, onSave, onReset }) {
   );
 }
 
-function ThalamusTab({ sim, onSubmit, onDeepSleep }) {
+function ThalamusTab({ sim, onSubmit }) {
   return (
     <div className="tab-stack">
       <section className="panel subtle">
-        <PanelTitle title="Thalamus Lab" subtitle="Preview intake scoring without storing an episode." />
-        <div className="thalamus-actions">
-          <button className="secondary slim" type="button" onClick={onDeepSleep}>Deep Sleep</button>
-        </div>
+        <PanelTitle title="Intake Simulator" subtitle="Preview how an episode would score before entering memory. Nothing is stored." />
+        <p className="panel-help">
+          The thalamus filter scores every episode on four dimensions — novelty, surprise, task relevance, and emotional valence.
+          Use this simulator to test whether a given action/context/outcome would pass the current thresholds before running real ingestion.
+        </p>
         <form className="lab-form thalamus-lab" onSubmit={onSubmit}>
           <input name="action" placeholder="Action" required />
           <input name="context" placeholder="Context" required />
@@ -553,7 +609,7 @@ function ThalamusTab({ sim, onSubmit, onDeepSleep }) {
             <option>Analogy</option>
             <option>Validation</option>
           </select>
-          <button className="primary" type="submit">Simulate</button>
+          <button className="primary" type="submit">Simulate intake</button>
         </form>
         {sim && <ScoreCard sim={sim} />}
       </section>
@@ -1229,7 +1285,7 @@ function labelForTab(tab) {
       : tab === "working-memory"
         ? "Working Memory"
       : tab === "thalamus"
-        ? "Thalamus"
+        ? "Simulator"
       : tab === "tuning"
         ? "Tuning"
       : tab === "performance"

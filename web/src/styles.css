@@ -1645,6 +1645,78 @@ input::placeholder {
   background: rgba(252, 90, 52, 0.08);
 }
 
+/* Action panels — memory maintenance etc */
+.action-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.action-hint {
+  color: var(--ui-gray-500);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  max-width: 42ch;
+}
+
+/* Button loading / feedback states */
+.consolidating {
+  opacity: 0.85;
+  cursor: wait;
+}
+
+.flash-success {
+  border-color: var(--ui-signal-3) !important;
+  background: var(--ui-signal-3) !important;
+  color: var(--ui-navy-950) !important;
+  font-weight: 700;
+}
+
+.flash-error {
+  border-color: var(--ui-signal-2) !important;
+  background: var(--ui-signal-2) !important;
+  color: var(--ui-white) !important;
+  font-weight: 700;
+}
+
+.btn-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+
+/* Inline spinner */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(9, 12, 18, 0.3);
+  border-top-color: var(--ui-navy-950);
+  border-radius: 999px;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Panel help text */
+.panel-help {
+  margin: 0 0 var(--space-16);
+  color: var(--ui-gray-500);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+
 @media (max-width: 900px) {
   .modal-panel {
     padding: var(--space-16);

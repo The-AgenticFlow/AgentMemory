@@ -159,6 +159,26 @@ impl PostgresMemoryStore {
         self.persist(snapshot).await
     }
 
+    /// Removes an engram from the relational metadata store.
+    pub async fn delete_engram(&self, id: Uuid) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        snapshot.engrams.retain(|e| e.id != id);
+        self.persist(snapshot).await
+    }
+
+    /// Removes schemas whose source engrams have been deleted.
+    pub async fn cleanup_schemas(&self, deleted_engram_ids: &[Uuid]) -> Result<usize> {
+        let mut snapshot = self.snapshot();
+        let before = snapshot.schemas.len();
+        for schema in &mut snapshot.schemas {
+            schema.source_engram_ids.retain(|id| !deleted_engram_ids.contains(id));
+        }
+        snapshot.schemas.retain(|s| !s.source_engram_ids.is_empty());
+        let removed = before - snapshot.schemas.len();
+        self.persist(snapshot).await?;
+        Ok(removed)
+    }
+
     /// Persists a schema or meta-engram record.
     pub async fn save_schema(&self, schema: &MetaEngram) -> Result<()> {
         let mut snapshot = self.snapshot();

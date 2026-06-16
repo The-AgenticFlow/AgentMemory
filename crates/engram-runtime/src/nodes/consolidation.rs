@@ -32,6 +32,14 @@ pub struct NightlyConsolidationNode {
     pub valence_decay_factor: f32,
     /// How much surprise reduces the decay rate (higher surprise = slower decay).
     pub surprise_decay_factor: f32,
+    /// Strength below which a buffered pattern is evicted.
+    pub pattern_eviction_threshold: f32,
+    /// Minimum working-memory strength before expiry.
+    pub working_memory_min_strength: f32,
+    /// Days after which archived engrams are permanently removed (0 = disabled).
+    pub archive_cleanup_days: i64,
+    /// Whether buffered-pattern decay should run during consolidation.
+    pub pattern_decay_enabled: bool,
     pub plasticity: PlasticityProfile,
     pub stc: SynapticTaggingCapture,
 }
@@ -45,6 +53,10 @@ impl Default for NightlyConsolidationNode {
             base_decay_rate: 0.08,
             valence_decay_factor: 0.02,
             surprise_decay_factor: 0.02,
+            pattern_eviction_threshold: 0.05,
+            working_memory_min_strength: 0.1,
+            archive_cleanup_days: 90,
+            pattern_decay_enabled: true,
             plasticity: PlasticityProfile::default(),
             stc: SynapticTaggingCapture::default(),
         }
@@ -60,12 +72,16 @@ impl NightlyConsolidationNode {
             base_decay_rate: config.base_decay_rate,
             valence_decay_factor: config.valence_decay_factor,
             surprise_decay_factor: config.surprise_decay_factor,
+            pattern_eviction_threshold: config.pattern_eviction_threshold,
+            working_memory_min_strength: config.working_memory_min_strength,
+            archive_cleanup_days: config.archive_cleanup_days,
+            pattern_decay_enabled: config.pattern_decay_enabled,
             plasticity: self.plasticity.clone(),
             stc: self.stc,
         }
     }
 
-    /// Runs decay followed by schema compression.
+    /// Runs decay, cleanup, and schema compression.
     pub async fn run(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -73,6 +89,13 @@ impl NightlyConsolidationNode {
         qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
         self.decay_engrams(qdrant, postgres).await?;
+        let (evicted_patterns, expired_wm, cleaned_engrams) = self.cleanup(qdrant, postgres).await?;
+        if evicted_patterns > 0 || expired_wm > 0 || cleaned_engrams > 0 {
+            tracing::info!(
+                "consolidation cleanup: evicted {} patterns, expired {} working-memory entries, removed {} archived engrams",
+                evicted_patterns, expired_wm, cleaned_engrams
+            );
+        }
         self.compress_schemas(qdrant, postgres, qwen).await
     }
 
@@ -131,6 +154,67 @@ impl NightlyConsolidationNode {
         let valence_reduction = scores.emotional_valence * self.valence_decay_factor;
         let surprise_reduction = scores.surprise * self.surprise_decay_factor;
         (self.base_decay_rate - valence_reduction - surprise_reduction).max(0.01)
+    }
+
+    /// Decays buffered patterns, expires working memory, and removes stale archived engrams.
+    async fn cleanup(
+        &self,
+        qdrant: &QdrantMemoryStore,
+        postgres: &PostgresMemoryStore,
+    ) -> Result<(usize, usize, usize)> {
+        let now = chrono::Utc::now();
+        let mut evicted_patterns = 0usize;
+        let expired_wm;
+        let mut cleaned_engrams = 0usize;
+
+        // 1. Pattern decay and eviction
+        if self.pattern_decay_enabled {
+            let patterns = qdrant.list_patterns().await?;
+            for pattern in patterns {
+                let days_since = (now - pattern.last_seen).num_days() as f32;
+                if days_since < 1.0 {
+                    continue;
+                }
+                let decayed_strength = pattern.strength * (-pattern.decay_rate * days_since).exp();
+                if decayed_strength <= self.pattern_eviction_threshold {
+                    qdrant.delete_pattern(&pattern.pattern_hash).await?;
+                    evicted_patterns += 1;
+                } else if decayed_strength < pattern.strength {
+                    let mut updated = pattern.clone();
+                    updated.strength = decayed_strength.clamp(0.0, 1.0);
+                    qdrant.upsert_pattern(&updated).await?;
+                }
+            }
+        }
+
+        // 2. Working memory expiry
+        let expired = postgres
+            .expire_working_memory(self.working_memory_min_strength)
+            .await?;
+        expired_wm = expired.len();
+
+        // 3. Archived engram cleanup
+        if self.archive_cleanup_days > 0 {
+            let mut deleted_ids = Vec::new();
+            let engrams = qdrant.list_engrams().await?;
+            for engram in engrams {
+                if matches!(engram.status, EngramStatus::Archived) {
+                    let last_active = engram.last_accessed.unwrap_or(engram.created_at);
+                    let age_days = (now - last_active).num_days();
+                    if age_days > self.archive_cleanup_days {
+                        qdrant.delete_engram(engram.id).await?;
+                        postgres.delete_engram(engram.id).await?;
+                        deleted_ids.push(engram.id);
+                        cleaned_engrams += 1;
+                    }
+                }
+            }
+            if !deleted_ids.is_empty() {
+                postgres.cleanup_schemas(&deleted_ids).await?;
+            }
+        }
+
+        Ok((evicted_patterns, expired_wm, cleaned_engrams))
     }
 
     /// Compresses similar engrams into schema-level meta-engrams.

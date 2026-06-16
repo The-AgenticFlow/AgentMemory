@@ -146,6 +146,20 @@ impl QdrantMemoryStore {
         self.persist(snapshot).await
     }
 
+    /// Removes a buffered pattern from the store.
+    pub async fn delete_pattern(&self, pattern_hash: &str) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        snapshot.patterns.retain(|p| p.pattern_hash != pattern_hash);
+        self.persist(snapshot).await
+    }
+
+    /// Removes a consolidated engram from the store.
+    pub async fn delete_engram(&self, id: uuid::Uuid) -> Result<()> {
+        let mut snapshot = self.snapshot();
+        snapshot.engrams.retain(|e| e.id != id);
+        self.persist(snapshot).await
+    }
+
     fn snapshot(&self) -> QdrantSnapshot {
         self.inner
             .lock()

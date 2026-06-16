@@ -141,6 +141,14 @@ pub struct ConsolidationConfig {
     pub base_decay_rate: f32,
     pub valence_decay_factor: f32,
     pub surprise_decay_factor: f32,
+    #[serde(default = "default_pattern_eviction_threshold")]
+    pub pattern_eviction_threshold: f32,
+    #[serde(default = "default_working_memory_min_strength")]
+    pub working_memory_min_strength: f32,
+    #[serde(default = "default_archive_cleanup_days")]
+    pub archive_cleanup_days: i64,
+    #[serde(default = "default_pattern_decay_enabled")]
+    pub pattern_decay_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -317,6 +325,10 @@ impl Default for RuntimeConfig {
                 base_decay_rate: 0.08,
                 valence_decay_factor: 0.02,
                 surprise_decay_factor: 0.02,
+                pattern_eviction_threshold: 0.05,
+                working_memory_min_strength: 0.1,
+                archive_cleanup_days: 90,
+                pattern_decay_enabled: true,
             },
             adaptive: AdaptiveConfig {
                 completion_bias_min: -0.15,
@@ -388,6 +400,11 @@ impl RuntimeConfig {
         validate_unit("consolidation.base_decay_rate", self.consolidation.base_decay_rate)?;
         validate_unit("consolidation.valence_decay_factor", self.consolidation.valence_decay_factor)?;
         validate_unit("consolidation.surprise_decay_factor", self.consolidation.surprise_decay_factor)?;
+        validate_unit("consolidation.pattern_eviction_threshold", self.consolidation.pattern_eviction_threshold)?;
+        validate_unit("consolidation.working_memory_min_strength", self.consolidation.working_memory_min_strength)?;
+        if self.consolidation.archive_cleanup_days < 0 {
+            return Err("consolidation.archive_cleanup_days must be >= 0".to_string());
+        }
         validate_unit("plasticity.surprise_multiplier", self.plasticity.surprise_multiplier)?;
         validate_unit("plasticity.outcome_multiplier", self.plasticity.outcome_multiplier)?;
         validate_unit("plasticity.stress_penalty", self.plasticity.stress_penalty)?;
@@ -514,6 +531,22 @@ fn default_decay_clamp_min() -> f32 {
 
 fn default_strength_clamp_min() -> f32 {
     0.05
+}
+
+fn default_pattern_eviction_threshold() -> f32 {
+    0.05
+}
+
+fn default_working_memory_min_strength() -> f32 {
+    0.1
+}
+
+fn default_archive_cleanup_days() -> i64 {
+    90
+}
+
+fn default_pattern_decay_enabled() -> bool {
+    true
 }
 
 #[cfg(test)]

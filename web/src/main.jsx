@@ -115,6 +115,7 @@ function App() {
   }
 
   const [showCreateBank, setShowCreateBank] = useState(false);
+  const [bankSearch, setBankSearch] = useState("");
 
   async function createBank(event) {
     event.preventDefault();
@@ -167,51 +168,74 @@ function App() {
         <section className="bank-portal">
           <div className="bank-portal-header">
             <h2>Memory Banks</h2>
+            <span className="bank-count">{banks.length}</span>
           </div>
-          <select
-            className="bank-select-main"
-            value={selectedBank}
-            onChange={(e) => setSelectedBank(e.target.value)}
-          >
-            <option value="">All banks</option>
-            {banks.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.bank_type})
-              </option>
-            ))}
-          </select>
+          <input
+            className="bank-search"
+            type="text"
+            placeholder="Search banks..."
+            value={bankSearch}
+            onChange={(e) => setBankSearch(e.target.value)}
+          />
+          <div className="bank-list">
+            {(() => {
+              const bankMap = new Map(banks.map((b) => [b.id, b]));
+              const getDepth = (bank) => {
+                let depth = 0;
+                let current = bank;
+                while (current?.parent_bank_id) {
+                  const parent = bankMap.get(current.parent_bank_id);
+                  if (!parent) break;
+                  depth++;
+                  current = parent;
+                }
+                return depth;
+              };
+              const query = bankSearch.trim().toLowerCase();
+              const filtered = query
+                ? banks.filter((b) => b.name.toLowerCase().includes(query) || b.bank_type.toLowerCase().includes(query))
+                : banks;
+              return filtered.length === 0 ? (
+                <div className="bank-list-empty">No banks match</div>
+              ) : (
+                filtered.map((bank) => {
+                  const depth = getDepth(bank);
+                  const isActive = selectedBank === bank.id;
+                  return (
+                    <button
+                      key={bank.id}
+                      type="button"
+                      className={isActive ? "bank-list-item active" : "bank-list-item"}
+                      style={{ paddingLeft: `${10 + depth * 14}px` }}
+                      onClick={() => setSelectedBank(bank.id)}
+                      title={`${bank.name} · ${bank.bank_type}${bank.parent_bank_id ? " (child)" : ""}`}
+                    >
+                      <span className={`bank-type-indicator ${bank.bank_type}`} />
+                      <div className="bank-list-meta">
+                        <strong>{bank.name}</strong>
+                        <small>{bank.memory_count} mem · {bank.schema_count} schema · {bank.directive_count} dir</small>
+                      </div>
+                      {isActive && <span className="bank-active-mark" />}
+                    </button>
+                  );
+                })
+              );
+            })()}
+          </div>
           {currentBank && (
             <div className="bank-info">
-              <strong>{currentBank.name}</strong>
-              <span className="badge">{currentBank.bank_type}</span>
+              <div className="bank-info-header">
+                <strong>{currentBank.name}</strong>
+                <span className="badge">{currentBank.bank_type}</span>
+              </div>
               {currentBank.mission && <p>{currentBank.mission}</p>}
-              <small>{banks.length} total banks</small>
             </div>
           )}
           <div className="bank-actions">
-            <button className="primary slim" type="button" onClick={() => setShowCreateBank((v) => !v)}>
+            <button className="primary slim" type="button" onClick={() => setShowCreateBank(true)}>
               + New Bank
             </button>
           </div>
-          {showCreateBank && (
-            <form className="lab-form compact" onSubmit={createBank} style={{ marginTop: "8px" }}>
-              <input name="name" placeholder="Bank name" required />
-              <select name="bank_type" defaultValue="dictionary">
-                <option value="session">Session</option>
-                <option value="dictionary">Dictionary</option>
-                <option value="shared">Shared</option>
-              </select>
-              <textarea name="mission" placeholder="Mission statement" rows={2} />
-              <textarea name="directives" placeholder="Directives (one per line)" rows={2} />
-              <select name="parent_bank_id">
-                <option value="">No parent</option>
-                {banks.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-              <button className="primary" type="submit">Create Bank</button>
-            </form>
-          )}
         </section>
 
         <nav className="rail-nav" aria-label="Sections">
@@ -269,7 +293,7 @@ function App() {
 
         <section className="workspace-body">
           {activeTab === "overview" && (
-            <OverviewTab overview={overview} counts={counts} banks={banks} currentBank={currentBank} onCreateBank={createBank} onDeleteBank={deleteBank} />
+            <OverviewTab overview={overview} counts={counts} banks={banks} currentBank={currentBank} onOpenCreateModal={() => setShowCreateBank(true)} onDeleteBank={deleteBank} onSelectBank={setSelectedBank} />
           )}
           {activeTab === "graph" && (
             <GraphTab graph={graph} selectedKind={selectedKind} setSelectedKind={setSelectedKind} />
@@ -325,16 +349,20 @@ function App() {
           )}
         </section>
       </section>
+
+      {showCreateBank && (
+        <BankCreateModal banks={banks} onSubmit={createBank} onClose={() => setShowCreateBank(false)} />
+      )}
     </main>
   );
 }
 
-function OverviewTab({ overview, counts, banks, currentBank, onCreateBank, onDeleteBank }) {
+function OverviewTab({ overview, counts, banks, currentBank, onOpenCreateModal, onDeleteBank, onSelectBank }) {
   const activeConfig = overview?.active_config || {};
   const thalamus = activeConfig.thalamus || {};
   const buffer = activeConfig.buffer || {};
   const retrieval = activeConfig.retrieval || {};
-  const [showCreate, setShowCreate] = useState(false);
+  const bankMap = useMemo(() => new Map(banks.map((b) => [b.id, b])), [banks]);
 
   return (
     <div className="dashboard-grid overview-grid">
@@ -396,48 +424,70 @@ function OverviewTab({ overview, counts, banks, currentBank, onCreateBank, onDel
       </section>
 
       <section className="panel subtle span-2">
-        <PanelTitle title="Memory Banks" subtitle="Active memory banks in the system." />
+        <div className="bank-section-header">
+          <PanelTitle title="Memory Banks" subtitle="Active memory banks in the system." />
+          <button className="primary slim" type="button" onClick={onOpenCreateModal}>
+            + New Bank
+          </button>
+        </div>
         <div className="bank-grid">
           {banks.length === 0 ? (
             <div className="empty-state">No banks yet.</div>
           ) : (
-            banks.map((bank) => (
-              <div key={bank.id} className="bank-card">
-                <div>
-                  <strong>{bank.name}</strong>
-                  <span className="badge">{bank.bank_type}</span>
-                  <small>{bank.memory_count} memories · {bank.schema_count} schemas · {bank.directive_count} directives</small>
+            banks.map((bank) => {
+              const parent = bankMap.get(bank.parent_bank_id);
+              return (
+                <div key={bank.id} className="bank-card">
+                  <div className="bank-card-body">
+                    <div className="bank-card-title">
+                      <span className={`bank-type-indicator ${bank.bank_type}`} />
+                      <strong>{bank.name}</strong>
+                      <span className="badge">{bank.bank_type}</span>
+                    </div>
+                    {parent && <small className="bank-card-parent">Parent: {parent.name}</small>}
+                    <small>{bank.memory_count} memories · {bank.schema_count} schemas · {bank.directive_count} directives</small>
+                    {bank.mission && <p className="bank-card-mission">{bank.mission}</p>}
+                  </div>
+                  <div className="bank-card-actions">
+                    <button className="secondary slim" type="button" onClick={() => onSelectBank(bank.id)}>Open</button>
+                    <button className="secondary slim danger" type="button" onClick={() => onDeleteBank(bank.id)}>Delete</button>
+                  </div>
                 </div>
-                <button className="secondary slim" type="button" onClick={() => onDeleteBank(bank.id)}>Delete</button>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
-        <div style={{ marginTop: "16px" }}>
-          <button className="primary slim" type="button" onClick={() => setShowCreate((v) => !v)}>
-            {showCreate ? "Cancel" : "+ New Bank"}
-          </button>
-        </div>
-        {showCreate && (
-          <form className="lab-form" onSubmit={onCreateBank} style={{ marginTop: "12px" }}>
-            <input name="name" placeholder="Bank name" required />
-            <select name="bank_type" defaultValue="dictionary">
-              <option value="session">Session</option>
-              <option value="dictionary">Dictionary</option>
-              <option value="shared">Shared</option>
-            </select>
-            <textarea name="mission" placeholder="Mission statement" rows={2} />
-            <textarea name="directives" placeholder="Directives (one per line)" rows={3} />
-            <select name="parent_bank_id">
-              <option value="">No parent</option>
-              {banks.map((b) => (
-                <option key={b.id} value={b.id}>{b.name} ({b.bank_type})</option>
-              ))}
-            </select>
-            <button className="primary" type="submit">Create Bank</button>
-          </form>
-        )}
       </section>
+    </div>
+  );
+}
+
+function BankCreateModal({ banks, onSubmit, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Create Memory Bank</h3>
+          <button className="secondary slim" type="button" onClick={onClose}>Close</button>
+        </div>
+        <form className="lab-form modal-form" onSubmit={onSubmit}>
+          <input name="name" placeholder="Bank name" required />
+          <select name="bank_type" defaultValue="dictionary">
+            <option value="session">Session</option>
+            <option value="dictionary">Dictionary</option>
+            <option value="shared">Shared</option>
+          </select>
+          <textarea name="mission" placeholder="Mission statement" rows={3} />
+          <textarea name="directives" placeholder="Directives (one per line)" rows={3} />
+          <select name="parent_bank_id">
+            <option value="">No parent</option>
+            {banks.map((b) => (
+              <option key={b.id} value={b.id}>{b.name} ({b.bank_type})</option>
+            ))}
+          </select>
+          <button className="primary" type="submit">Create Bank</button>
+        </form>
+      </div>
     </div>
   );
 }

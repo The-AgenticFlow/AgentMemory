@@ -155,6 +155,20 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             state.sessions.write().await.insert(session_id, handle);
             serde_json::to_value(retrieval).map_err(internal)?
         }
+        "memory_list_sessions" => {
+            let bank_id = args.get("bank_id").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok());
+            let sessions = if let Some(id) = bank_id {
+                state.system.postgres.list_sessions_by_bank(id).await.map_err(internal)?
+            } else {
+                state.system.postgres.list_sessions().await.map_err(internal)?
+            };
+            let open_ids: Vec<Uuid> = state.sessions.read().await.keys().cloned().collect();
+            serde_json::to_value(json!({
+                "sessions": sessions,
+                "open_in_memory": open_ids.len(),
+                "open_session_ids": open_ids
+            })).map_err(internal)?
+        }
         "memory_reflect" => {
             let schemas = state.system.consolidate().await.map_err(internal)?;
             json!({ "created_schemas": schemas.len(), "schemas": schemas })
@@ -265,6 +279,9 @@ async fn get_prompt(params: Value) -> Result<Value, (i64, String)> {
         "consolidation-review" => {
             "Review new schemas and weakened/archived engrams. Identify useful patterns, drift, and tuning changes."
         }
+        "memory-session-lifecycle" => {
+            "Agent Memory session workflow:\n1. Call memory_open_session to start. Save the returned id as session_id.\n2. Use memory_retain after each meaningful step to store action/context/outcome.\n3. Use memory_recall to retrieve relevant past memories before answering.\n4. Use memory_get_working_context to read current goals and active engrams.\n5. Call memory_close_session with the session_id when the task ends.\n\nIf you lose the session_id, call memory_list_sessions to recover it."
+        }
         _ => return Err((-32602, format!("unknown prompt: {name}"))),
     };
     Ok(json!({
@@ -280,73 +297,93 @@ fn tools() -> Vec<Value> {
     vec![
         json!({
             "name": "memory_open_session",
-            "description": "Open a memory session. Optionally pass bank_id to target a specific memory bank.",
+            "description": "Open a new memory session. Returns a session object with an 'id' field. You MUST save this id and pass it as session_id to all other session-scoped tools such as memory_retain, memory_recall, memory_get_working_context, and memory_close_session.",
             "inputSchema": { "type": "object", "properties": {
-                "expectation": { "type": "string" },
-                "task_context": { "type": "string" },
-                "mode": { "type": "string", "enum": ["Exploration", "Routine", "Critical", "Analogy", "Validation"] },
-                "bank_id": { "type": "string" }
+                "expectation": { "type": "string", "description": "What you expect to remember from this interaction" },
+                "task_context": { "type": "string", "description": "Description of the task or conversation topic" },
+                "mode": { "type": "string", "enum": ["Exploration", "Routine", "Critical", "Analogy", "Validation"], "description": "Session mode / cognitive posture" },
+                "bank_id": { "type": "string", "description": "Optional UUID of a specific memory bank to use. If omitted, uses the default shared bank." }
             }}
         }),
         json!({
             "name": "memory_close_session",
-            "description": "Close an active memory session and persist its state.",
+            "description": "Close an active memory session and persist its final state. Always call this when finished with a session.",
             "inputSchema": { "type": "object", "properties": {
-                "session_id": { "type": "string" }
+                "session_id": { "type": "string", "description": "UUID of the session returned by memory_open_session" }
             }, "required": ["session_id"] }
         }),
         json!({
             "name": "memory_retain",
-            "description": "Retain one action/context/outcome episode (Cogniti alias for capture_episode).",
-            "inputSchema": { "type": "object" }
+            "description": "Store an episode (action, context, outcome) into the memory system scoped to a session. Use this after completing a meaningful step so it can be recalled later.",
+            "inputSchema": { "type": "object", "properties": {
+                "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
+                "action": { "type": "string", "description": "What was done (e.g. 'fixed Dockerfile networking')" },
+                "context": { "type": "string", "description": "The surrounding context or prerequisites" },
+                "outcome": { "type": "string", "description": "The result or effect of the action" }
+            }, "required": ["session_id"] }
         }),
         json!({
             "name": "memory_recall",
-            "description": "Recall structured memories for a query (Cogniti alias for retrieve).",
-            "inputSchema": { "type": "object" }
+            "description": "Retrieve structured memories relevant to a query, scoped to a session. Returns facts, inferences, and gaps.",
+            "inputSchema": { "type": "object", "properties": {
+                "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
+                "query": { "type": "string", "description": "The memory query or question to answer from stored episodes" }
+            }, "required": ["session_id"] }
+        }),
+        json!({
+            "name": "memory_list_sessions",
+            "description": "List all sessions in the system. Use this to recover a lost session_id or see which sessions are currently open.",
+            "inputSchema": { "type": "object", "properties": {
+                "bank_id": { "type": "string", "description": "Optional UUID of a bank to filter sessions by" }
+            }}
         }),
         json!({
             "name": "memory_reflect",
-            "description": "Run reflection/consolidation and schema generation (Cogniti alias for consolidate).",
+            "description": "Run background consolidation to form schemas from recent episodes. This is a global operation and does not require a session_id.",
             "inputSchema": { "type": "object" }
         }),
         json!({
             "name": "memory_get_working_context",
-            "description": "Read the active working context",
-            "inputSchema": { "type": "object" }
+            "description": "Read the working context (active goals, engrams, inference layer) for a session.",
+            "inputSchema": { "type": "object", "properties": {
+                "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" }
+            }, "required": ["session_id"] }
         }),
         json!({
             "name": "memory_update_working_context",
-            "description": "Open/update a working context",
-            "inputSchema": { "type": "object" }
+            "description": "Open or update the working context for a session with a new task_id.",
+            "inputSchema": { "type": "object", "properties": {
+                "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
+                "task_id": { "type": "string", "description": "Identifier for the task or sub-task" }
+            }, "required": ["session_id"] }
         }),
         json!({
             "name": "memory_get_config",
-            "description": "Read runtime behavior config",
+            "description": "Read the current runtime behavior configuration (thalamus weights, thresholds, retrieval knobs).",
             "inputSchema": { "type": "object" }
         }),
         json!({
             "name": "memory_update_config",
-            "description": "Update runtime behavior config",
+            "description": "Update the runtime behavior configuration. Pass the full config object as JSON.",
             "inputSchema": { "type": "object" }
         }),
         json!({
             "name": "memory_create_bank",
-            "description": "Create a new hierarchical memory bank for isolated agent memory.",
+            "description": "Create a new hierarchical memory bank for isolated agent memory. Banks can be session, dictionary, or shared.",
             "inputSchema": { "type": "object", "properties": {
-                "name": { "type": "string" },
-                "type": { "type": "string", "enum": ["session", "dictionary", "shared"] },
-                "mission": { "type": "string" },
-                "directives": { "type": "array", "items": { "type": "string" } },
-                "parent_bank_id": { "type": "string" }
+                "name": { "type": "string", "description": "Human-readable name for the bank" },
+                "type": { "type": "string", "enum": ["session", "dictionary", "shared"], "description": "Bank type: session (short-lived), dictionary (agent knowledge), shared (cross-agent schemas)" },
+                "mission": { "type": "string", "description": "Optional mission statement defining what knowledge this bank should prioritize" },
+                "directives": { "type": "array", "items": { "type": "string" }, "description": "Optional list of hard rules / guardrails, one per item" },
+                "parent_bank_id": { "type": "string", "description": "Optional UUID of a parent bank for hierarchical schema propagation" }
             }, "required": ["name", "type"] }
         }),
         json!({
             "name": "memory_get_bank",
             "description": "Get a memory bank by ID or name. Requires either bank_id (UUID string) or name.",
             "inputSchema": { "type": "object", "properties": {
-                "bank_id": { "type": "string" },
-                "name": { "type": "string" }
+                "bank_id": { "type": "string", "description": "UUID of the bank to fetch" },
+                "name": { "type": "string", "description": "Name of the bank to fetch" }
             } }
         }),
     ]
@@ -370,6 +407,7 @@ fn prompts() -> Vec<Value> {
         ("memory-grounded-answer", "Answer using Agent Memory evidence"),
         ("session-summary", "Summarize active session memory"),
         ("consolidation-review", "Review consolidation output"),
+        ("memory-session-lifecycle", "How to open, use, and close a memory session"),
     ]
     .into_iter()
     .map(|(name, description)| json!({ "name": name, "description": description }))

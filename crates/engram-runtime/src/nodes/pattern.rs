@@ -78,6 +78,13 @@ impl PatternSepCompNode {
                 engram.tags.dedup();
                 engram.strength = (engram.strength + pattern.strength * self.strength_merge_ratio).clamp(0.0, 1.0);
                 engram.touch();
+                let prev = engram.thalamus_scores;
+                engram.thalamus_scores = engram_core::ThalamusScores {
+                    novelty: (prev.novelty + pattern.thalamus_scores.novelty) / 2.0,
+                    surprise: (prev.surprise + pattern.thalamus_scores.surprise) / 2.0,
+                    task_relevance: (prev.task_relevance + pattern.thalamus_scores.task_relevance) / 2.0,
+                    emotional_valence: (prev.emotional_valence + pattern.thalamus_scores.emotional_valence) / 2.0,
+                };
                 engram.bank_id = pattern.bank_id;
                 if let Some(ref existing) = engram.episodic_content_ref {
                     if !existing.contains(&pattern.content) {
@@ -106,6 +113,7 @@ impl PatternSepCompNode {
                 engram.kinship_ref = Some(candidate.item.id);
                 engram.bank_id = pattern.bank_id;
                 engram.strength = pattern.strength;
+                engram.thalamus_scores = pattern.thalamus_scores;
                 engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
@@ -128,6 +136,7 @@ impl PatternSepCompNode {
                 );
                 engram.bank_id = pattern.bank_id;
                 engram.strength = pattern.strength;
+                engram.thalamus_scores = pattern.thalamus_scores;
                 engram.episodic_content_ref = Some(pattern.content.clone());
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;

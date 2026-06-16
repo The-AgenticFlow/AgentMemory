@@ -69,29 +69,33 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* Layout shell */
-.app-shell {
-    display: grid;
-    grid-template-columns: var(--rail-w, 280px) 1fr;
-    min-height: 100vh;
-    background: var(--ui-navy-950);
+  /* Layout shell — split-pane so sidebar and workspace scroll independently */
+  .app-shell {
+      display: grid;
+      grid-template-columns: var(--rail-w, 280px) 1fr;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--ui-navy-950);
+      color: var(--ui-white);
+  }
+
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  /* Rail sidebar — structural, no extra radii */
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: 16px 14px;
     color: var(--ui-white);
-}
-
-.app-shell.sidebar-collapsed {
-  grid-template-columns: 68px minmax(0, 1fr);
-}
-
-/* Rail sidebar — structural, no extra radii */
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  padding: 16px 14px;
-  color: var(--ui-white);
-  background: var(--ui-navy-900);
-  border-right: 1px solid var(--ui-line);
-}
+    background: var(--ui-navy-900);
+    border-right: 1px solid var(--ui-line);
+    height: 100vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
 
 .app-shell.sidebar-collapsed .rail {
   padding-inline: 10px;
@@ -231,6 +235,9 @@ select:focus-visible {
 .workspace {
   min-width: 0;
   padding: var(--space-16);
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Topbar — no radii, 1px border, matte surface */
@@ -1266,6 +1273,8 @@ input::placeholder {
   .app-shell,
   .app-shell.sidebar-collapsed {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
   }
 
   .rail {
@@ -1274,12 +1283,16 @@ input::placeholder {
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    height: auto;
+    overflow: visible;
   }
 
   .rail-nav { display: none; }
 
   .workspace {
     padding-top: 0;
+    height: auto;
+    overflow: visible;
   }
 
   .metric-grid {
@@ -1346,5 +1359,301 @@ input::placeholder {
 
   .graph-overlay {
     inset: 8px;
+  }
+}
+
+/* Bank portal — rich list + modal */
+.bank-portal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.bank-portal-header h2 {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ui-gray-500);
+  font-weight: 700;
+}
+
+.bank-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ui-gray-700);
+  font-family: var(--font-data);
+}
+
+.bank-search {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-navy-950);
+  color: var(--ui-white);
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+
+.bank-search::placeholder {
+  color: var(--ui-gray-700);
+}
+
+.bank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-navy-950);
+  padding: 4px;
+}
+
+.bank-list-empty {
+  padding: 12px;
+  color: var(--ui-gray-700);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.bank-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--ui-gray-300);
+  text-align: left;
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  border-radius: 0;
+}
+
+.bank-list-item:hover {
+  background: rgba(240, 243, 248, 0.04);
+  color: var(--ui-white);
+}
+
+.bank-list-item.active {
+  background: rgba(242, 166, 10, 0.08);
+  color: var(--ui-white);
+  outline: 1px solid var(--ui-line-active);
+}
+
+.bank-type-indicator {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--ui-gray-700);
+}
+
+.bank-type-indicator.session { background: var(--ui-signal-4); }
+.bank-type-indicator.dictionary { background: var(--ui-signal); }
+.bank-type-indicator.shared { background: var(--ui-signal-3); }
+
+.bank-list-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bank-list-meta strong {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: inherit;
+}
+
+.bank-list-meta small {
+  font-size: 0.72rem;
+  color: var(--ui-gray-500);
+}
+
+.bank-active-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ui-signal);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.bank-info {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-navy-950);
+}
+
+.bank-info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bank-info strong {
+  font-size: 0.92rem;
+  color: var(--ui-white);
+}
+
+.bank-info .badge {
+  border: 1px solid var(--ui-line-strong);
+  color: var(--ui-gray-300);
+  background: transparent;
+}
+
+.bank-info p {
+  margin: 8px 0 0;
+  color: var(--ui-gray-500);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.bank-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(9, 12, 18, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.modal-panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-navy-900);
+  padding: var(--space-24);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--space-16);
+  padding-bottom: var(--space-16);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ui-white);
+}
+
+.modal-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-16);
+}
+
+.modal-form textarea[name="mission"],
+.modal-form textarea[name="directives"] {
+  grid-column: span 2;
+}
+
+.modal-form select[name="parent_bank_id"] {
+  grid-column: span 2;
+}
+
+.modal-form .primary {
+  grid-column: span 2;
+}
+
+/* Bank cards — overview grid */
+.bank-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: var(--space-16);
+}
+
+.bank-section-header .panel-title {
+  margin-bottom: 0;
+}
+
+.bank-card {
+  border: 1px solid var(--ui-line);
+  padding: var(--space-16);
+  background: var(--ui-navy-950);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.bank-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bank-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bank-card-title strong {
+  font-size: 0.92rem;
+  color: var(--ui-white);
+}
+
+.bank-card-parent {
+  color: var(--ui-gray-700);
+  font-size: 0.76rem;
+}
+
+.bank-card-mission {
+  margin: 4px 0 0;
+  color: var(--ui-gray-500);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.bank-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.secondary.danger {
+  border-color: rgba(252, 90, 52, 0.35);
+  color: var(--ui-signal-2);
+}
+
+.secondary.danger:hover {
+  background: rgba(252, 90, 52, 0.08);
+}
+
+@media (max-width: 900px) {
+  .modal-panel {
+    padding: var(--space-16);
+  }
+
+  .modal-form,
+  .modal-form textarea,
+  .modal-form select,
+  .modal-form .primary {
+    grid-column: auto;
   }
 }

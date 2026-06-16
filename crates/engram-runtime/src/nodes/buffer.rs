@@ -121,6 +121,13 @@ impl BufferIngestNode {
                     pattern.threshold =
                         (pattern.threshold - temporal_signal.spillover * self.threshold_sensitivity).clamp(0.0, 1.0);
                 }
+                let prev = pattern.thalamus_scores;
+                pattern.thalamus_scores = engram_core::ThalamusScores {
+                    novelty: (prev.novelty + assessment.scores.novelty) / 2.0,
+                    surprise: (prev.surprise + assessment.scores.surprise) / 2.0,
+                    task_relevance: (prev.task_relevance + assessment.scores.task_relevance) / 2.0,
+                    emotional_valence: (prev.emotional_valence + assessment.scores.emotional_valence) / 2.0,
+                };
                 pattern
             }
             None => {
@@ -147,6 +154,7 @@ impl BufferIngestNode {
             }
         };
 
+        entry.thalamus_scores = assessment.scores;
         entry.strength = entry.strength.max(assessment.score).clamp(0.0, 1.0);
         let check_signal = plasticity.signal(
             &assessment.scores,

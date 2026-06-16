@@ -18,6 +18,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ThalamusScores;
+
 /// A buffered pattern that may become a consolidated engram.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PatternEntry {
@@ -48,6 +50,9 @@ pub struct PatternEntry {
     /// Memory bank this pattern belongs to.
     #[serde(default)]
     pub bank_id: Option<Uuid>,
+    /// Thalamus dimension scores that produced this pattern.
+    #[serde(default)]
+    pub thalamus_scores: ThalamusScores,
 }
 
 /// The origin of a buffered pattern.
@@ -102,6 +107,7 @@ impl PatternEntry {
             source,
             episode_refs: vec![episode_ref],
             bank_id,
+            thalamus_scores: ThalamusScores::default(),
         }
     }
 

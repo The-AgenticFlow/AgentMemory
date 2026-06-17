@@ -88,14 +88,15 @@ Opens a new session bound to a bank (optional). Returns a `session_id` you must 
 | `expectation` | string | No | What you expect to happen. Default: `"remember useful context"` |
 | `mode` | string | No | `"Exploration"`, `"Routine"`, `"Critical"`, `"Analogy"`, `"Validation"` |
 | `task_context` | string | No | Human-readable task description |
-| `bank_id` | uuid | No | Target a specific memory bank |
+| `bank_id` | uuid | No | Target a specific memory bank by UUID |
+| `bank_name` | string | No | Target a specific memory bank by name (alternative to `bank_id`) |
 
 ```
 memory_open_session: {
   "expectation": "Refactor the auth module without breaking JWT flow",
   "mode": "Critical",
   "task_context": "Refactor authentication middleware to use new token format",
-  "bank_id": "uuid-from-create-bank"
+  "bank_name": "my-project-dictionary"
 }
 ```
 
@@ -129,6 +130,11 @@ Working context is short-term scratchpad memory scoped to the active session —
 
 Returns the current working state: goal stack, active engrams, episodic buffer, and inference layer.
 
+**Parameters:**
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `session_id` | uuid | Yes | The session to query |
+
 ```
 memory_get_working_context: {
   "session_id": "uuid"
@@ -138,6 +144,12 @@ memory_get_working_context: {
 ### `memory_update_working_context`
 
 Sets or replaces the working context with a new task frame.
+
+**Parameters:**
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `session_id` | uuid | Yes | The session to update |
+| `task_id` | string | No | Identifier for the active task |
 
 ```
 memory_update_working_context: {
@@ -155,6 +167,14 @@ An episode is one action/context/outcome triplet. It is the atomic unit of memor
 ### `memory_retain`
 
 Scores and stores an episode. The thalamus filter evaluates it against the session's expectation, mode, and recent engrams before deciding whether to retain it.
+
+**Parameters:**
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `session_id` | uuid | Yes | The session this episode belongs to |
+| `action` | string | No | What was done |
+| `context` | string | No | Why it was done / surrounding situation |
+| `outcome` | string | No | What happened as a result |
 
 **Thalamus scoring dimensions:**
 - **Novelty** (0-1): How different this is from recent engrams
@@ -200,6 +220,12 @@ outcome: "It works now"
 ## 5. Retrieval — `memory_recall`
 
 Queries the memory system for relevant past episodes, engrams, and schemas.
+
+**Parameters:**
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `session_id` | uuid | Yes | The session to recall within |
+| `query` | string | No | Natural-language search query |
 
 ```
 memory_recall: {
@@ -253,7 +279,7 @@ Returns created schemas. Call this at natural breakpoints — after completing a
 
 ```
 1. memory_create_bank → get bank_id
-2. memory_open_session(bank_id, mode, expectation) → get session_id
+2. memory_open_session(bank_id or bank_name, mode, expectation) → get session_id
 3. memory_update_working_context(session_id, task_id)
 4. ... work loop ...
    - memory_retain(session_id, action, context, outcome)
@@ -264,8 +290,9 @@ Returns created schemas. Call this at natural breakpoints — after completing a
 
 ## Important Notes
 
-- **Always pass `session_id`** to `memory_retain`, `memory_recall`, and `memory_update_working_context`. Without it, these tools cannot route to the correct memory frame.
+- **Always pass `session_id`** to `memory_retain`, `memory_recall`, `memory_get_working_context`, and `memory_update_working_context`. Without it, these tools cannot route to the correct memory frame.
 - **`memory_open_session` returns the session object** — extract the `id` field from the response and store it for later calls.
+- **Use `bank_name` instead of `bank_id`** when you want to reference a bank by its human-readable name — e.g. `"my-project-dictionary"` instead of a UUID.
 - **Use `Critical` mode** when you need to ensure nothing is silently dropped by the thalamus filter.
 - **Bank hierarchy matters**: child banks inherit schema knowledge from parents. Create session banks under dictionary banks for proper propagation.
 - **The thalamus filter is active by default**: episodes below the mode threshold are silently discarded. If you're losing memories you care about, either switch to `Critical` mode or adjust thresholds via `memory_update_config`.

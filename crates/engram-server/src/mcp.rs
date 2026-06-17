@@ -91,7 +91,17 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             let expectation = string_arg(&args, "expectation", "remember useful context");
             let task_context = string_arg(&args, "task_context", "agent task");
             let mode = parse_mode(args.get("mode").and_then(Value::as_str).unwrap_or("Exploration"))?;
-            let bank_id = args.get("bank_id").and_then(Value::as_str).and_then(|s| Uuid::parse_str(s).ok());
+            let bank_id = if let Some(id_str) = args.get("bank_id").and_then(Value::as_str) {
+                Some(Uuid::parse_str(id_str).map_err(internal)?)
+            } else if let Some(bank_name) = args.get("bank_name").and_then(Value::as_str) {
+                Some(
+                    state.system.postgres.find_bank_by_name(bank_name).await.map_err(internal)?
+                        .map(|b| b.id)
+                        .ok_or_else(|| (-32004, format!("bank not found: {bank_name}")))?
+                )
+            } else {
+                None
+            };
             let handle = state
                 .system
                 .open_session(None, bank_id, expectation, mode, task_context)
@@ -297,12 +307,13 @@ fn tools() -> Vec<Value> {
     vec![
         json!({
             "name": "memory_open_session",
-            "description": "Open a new memory session. Returns a session object with an 'id' field. You MUST save this id and pass it as session_id to all other session-scoped tools such as memory_retain, memory_recall, memory_get_working_context, and memory_close_session.",
+"description": "Open a new memory session. Returns a session object with an 'id' field. You MUST save this id and pass it as session_id to all other session-scoped tools such as memory_retain, memory_recall, memory_get_working_context, and memory_close_session. Optionally pass bank_id or bank_name to target a specific memory bank.",
             "inputSchema": { "type": "object", "properties": {
                 "expectation": { "type": "string", "description": "What you expect to remember from this interaction" },
                 "task_context": { "type": "string", "description": "Description of the task or conversation topic" },
                 "mode": { "type": "string", "enum": ["Exploration", "Routine", "Critical", "Analogy", "Validation"], "description": "Session mode / cognitive posture" },
-                "bank_id": { "type": "string", "description": "Optional UUID of a specific memory bank to use. If omitted, uses the default shared bank." }
+                "bank_id": { "type": "string", "description": "Optional UUID of a specific memory bank to use. If omitted, uses the default shared bank." },
+                "bank_name": { "type": "string", "description": "Name of the memory bank (alternative to bank_id)" }
             }}
         }),
         json!({
@@ -314,7 +325,7 @@ fn tools() -> Vec<Value> {
         }),
         json!({
             "name": "memory_retain",
-            "description": "Store an episode (action, context, outcome) into the memory system scoped to a session. Use this after completing a meaningful step so it can be recalled later.",
+"description": "Store an episode (action, context, outcome) into the memory system scoped to a session. Use this after completing a meaningful step so it can be recalled later.",
             "inputSchema": { "type": "object", "properties": {
                 "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
                 "action": { "type": "string", "description": "What was done (e.g. 'fixed Dockerfile networking')" },
@@ -324,7 +335,7 @@ fn tools() -> Vec<Value> {
         }),
         json!({
             "name": "memory_recall",
-            "description": "Retrieve structured memories relevant to a query, scoped to a session. Returns facts, inferences, and gaps.",
+"description": "Retrieve structured memories relevant to a query, scoped to a session. Returns facts, inferences, and gaps.",
             "inputSchema": { "type": "object", "properties": {
                 "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
                 "query": { "type": "string", "description": "The memory query or question to answer from stored episodes" }
@@ -338,20 +349,28 @@ fn tools() -> Vec<Value> {
             }}
         }),
         json!({
+            "name": "memory_get_bank",
+            "description": "Get a memory bank by ID or name. Requires either bank_id (UUID string) or name.",
+            "inputSchema": { "type": "object", "properties": {
+                "bank_id": { "type": "string", "description": "UUID of the memory bank" },
+                "name": { "type": "string", "description": "Name of the memory bank" }
+            }}
+        }),
+        json!({
             "name": "memory_reflect",
             "description": "Run background consolidation to form schemas from recent episodes. This is a global operation and does not require a session_id.",
             "inputSchema": { "type": "object" }
         }),
         json!({
             "name": "memory_get_working_context",
-            "description": "Read the working context (active goals, engrams, inference layer) for a session.",
+"description": "Read the working context (active goals, engrams, inference layer) for a session.",
             "inputSchema": { "type": "object", "properties": {
                 "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" }
             }, "required": ["session_id"] }
         }),
         json!({
             "name": "memory_update_working_context",
-            "description": "Open or update the working context for a session with a new task_id.",
+"description": "Open or update the working context for a session with a new task_id.",
             "inputSchema": { "type": "object", "properties": {
                 "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
                 "task_id": { "type": "string", "description": "Identifier for the task or sub-task" }

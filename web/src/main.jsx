@@ -19,22 +19,25 @@ function App() {
   const [sim, setSim] = useState(null);
   const [banks, setBanks] = useState([]);
   const [selectedBank, setSelectedBank] = useState("");
+  const selectedBankRef = useRef("");
 
   function apiQuery(path, bankId) {
     return bankId ? `${path}?bank_id=${bankId}` : path;
   }
 
-  async function refresh(bankId = selectedBank) {
+  async function refresh(bankId) {
+    const effectiveBankId = bankId ?? selectedBankRef.current;
     const health = await safeApi("/health");
     const banksData = await safeApi("/banks", []);
     setBanks(banksData);
 
-    // If no bank selected and we have banks, auto-select the first one
-    // (except on initial load where selectedBank might already be set)
-    let effectiveBank = bankId;
+    let effectiveBank = effectiveBankId;
     if (!effectiveBank && banksData.length > 0) {
       effectiveBank = banksData[0].id;
+    }
+    if (effectiveBank && effectiveBank !== selectedBankRef.current) {
       setSelectedBank(effectiveBank);
+      selectedBankRef.current = effectiveBank;
     }
 
     const q = apiQuery;
@@ -62,33 +65,31 @@ function App() {
 
   useEffect(() => {
     refresh("").catch((error) => setStatus(error.message));
-    const timer = window.setInterval(() => refresh(selectedBank).catch((error) => setStatus(error.message)), 15000);
-    const handleRefresh = () => refresh(selectedBank).catch((error) => setStatus(error.message));
+    const timer = window.setInterval(() => refresh().catch((error) => setStatus(error.message)), 15000);
+    const handleRefresh = () => refresh().catch((error) => setStatus(error.message));
     window.addEventListener("engram-refresh", handleRefresh);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("engram-refresh", handleRefresh);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (selectedBank) {
       refresh(selectedBank).catch((error) => setStatus(error.message));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBank]);
 
   async function saveConfig(nextConfig) {
     const saved = await api("/control/config", { method: "PUT", body: nextConfig });
     setConfig(saved);
-    await refresh(selectedBank);
+    await refresh();
   }
 
   async function resetConfig() {
     const saved = await api("/control/config/reset", { method: "POST" });
     setConfig(saved);
-    await refresh(selectedBank);
+    await refresh();
   }
 
   async function runThalamusPreview(event) {
@@ -109,7 +110,7 @@ function App() {
   }
 
   async function consolidate() {
-    if (consolidating) return;
+if (consolidating) return;
     setConsolidating(true);
     setConsolidateFlash("running");
     setStatus("Deep sleep running…");
@@ -155,8 +156,11 @@ function App() {
 
   async function deleteBank(bankId) {
     if (!window.confirm("Delete this bank and all its data?")) return;
-    await api(`/banks/${bankId}`, { method: "DELETE" });
-    if (selectedBank === bankId) setSelectedBank("");
+    await safeApi(`/banks/${bankId}`, null, { method: "DELETE" });
+    if (selectedBankRef.current === bankId) {
+      setSelectedBank("");
+      selectedBankRef.current = "";
+    }
     window.dispatchEvent(new Event("engram-refresh"));
   }
 
@@ -239,6 +243,7 @@ function App() {
               );
             })()}
           </div>
+
           {currentBank && (
             <div className="bank-info">
               <div className="bank-info-header">

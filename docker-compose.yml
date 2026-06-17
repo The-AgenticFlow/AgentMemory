@@ -15,6 +15,7 @@ services:
       ENGRAM_NEO4J_DATABASE: neo4j
       ENGRAM_MCP_HTTP_ENABLED: "true"
       ENGRAM_MCP_STDIO_ENABLED: "true"
+      RUST_LOG: warn
     ports:
       - "3001:3001"
     volumes:

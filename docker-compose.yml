@@ -25,6 +25,27 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2
+    profiles:
+      - prod
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ENGRAM_DOMAIN: ${ENGRAM_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      engram:
+        condition: service_started
+    networks:
+      - default
+
   neo4j:
     image: neo4j:5.26-community
     environment:
@@ -51,3 +72,5 @@ volumes:
   engram-data:
   neo4j-data:
   neo4j-logs:
+  caddy_data:
+  caddy_config:

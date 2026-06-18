@@ -56,8 +56,7 @@ impl TemporalRetrieval {
             1.0
         };
         let recency = self.params.recency_weight * decay;
-        let access = self.params.frequency_weight
-            * (1.0 - (-(engram.access_count as f32)).exp());
+        let access = self.params.frequency_weight * (1.0 - (-(engram.access_count as f32)).exp());
         (recency + access).clamp(0.0, 1.0)
     }
 
@@ -79,10 +78,7 @@ impl TemporalRetrieval {
         hours: i64,
     ) -> Vec<&'a EngramEntry> {
         let cutoff = self.reference_time - chrono::Duration::hours(hours);
-        engrams
-            .iter()
-            .filter(|e| e.created_at >= cutoff)
-            .collect()
+        engrams.iter().filter(|e| e.created_at >= cutoff).collect()
     }
 }
 
@@ -93,7 +89,12 @@ mod tests {
     use uuid::Uuid;
 
     fn make_engram_at(age_hours: i64) -> EngramEntry {
-        let mut e = EngramEntry::new(vec![1.0], vec!["test".into()], Uuid::new_v4(), EngramSource::Direct);
+        let mut e = EngramEntry::new(
+            vec![1.0],
+            vec!["test".into()],
+            Uuid::new_v4(),
+            EngramSource::Direct,
+        );
         e.created_at = Utc::now() - chrono::Duration::hours(age_hours);
         e.access_count = if age_hours == 0 { 10 } else { 0 };
         e
@@ -112,11 +113,7 @@ mod tests {
     fn window_filter_excludes_old() {
         let params = TemporalParams::default();
         let temporal = TemporalRetrieval::new(params);
-        let engrams = vec![
-            make_engram_at(0),
-            make_engram_at(1),
-            make_engram_at(96),
-        ];
+        let engrams = vec![make_engram_at(0), make_engram_at(1), make_engram_at(96)];
         let windowed = temporal.filter_window(&engrams, 12);
         assert_eq!(windowed.len(), 2);
     }

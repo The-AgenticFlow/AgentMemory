@@ -6,14 +6,14 @@
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
 use engram_qwen::{
-    chat::{ChatMessage, ChatRequest},
     DashScopeClient,
+    chat::{ChatMessage, ChatRequest},
 };
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
 
-use crate::embeddings::{cosine_similarity, embed_text};
 use crate::config::ConsolidationConfig;
+use crate::embeddings::{cosine_similarity, embed_text};
 use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
 
@@ -89,11 +89,14 @@ impl NightlyConsolidationNode {
         qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
         self.decay_engrams(qdrant, postgres).await?;
-        let (evicted_patterns, expired_wm, cleaned_engrams) = self.cleanup(qdrant, postgres).await?;
+        let (evicted_patterns, expired_wm, cleaned_engrams) =
+            self.cleanup(qdrant, postgres).await?;
         if evicted_patterns > 0 || expired_wm > 0 || cleaned_engrams > 0 {
             tracing::info!(
                 "consolidation cleanup: evicted {} patterns, expired {} working-memory entries, removed {} archived engrams",
-                evicted_patterns, expired_wm, cleaned_engrams
+                evicted_patterns,
+                expired_wm,
+                cleaned_engrams
             );
         }
         self.compress_schemas(qdrant, postgres, qwen).await
@@ -164,7 +167,6 @@ impl NightlyConsolidationNode {
     ) -> Result<(usize, usize, usize)> {
         let now = chrono::Utc::now();
         let mut evicted_patterns = 0usize;
-        let expired_wm;
         let mut cleaned_engrams = 0usize;
 
         // 1. Pattern decay and eviction
@@ -191,7 +193,7 @@ impl NightlyConsolidationNode {
         let expired = postgres
             .expire_working_memory(self.working_memory_min_strength)
             .await?;
-        expired_wm = expired.len();
+        let expired_wm = expired.len();
 
         // 3. Archived engram cleanup
         if self.archive_cleanup_days > 0 {
@@ -255,12 +257,11 @@ impl NightlyConsolidationNode {
             let tags = cluster_tag_intersection(&cluster);
             let source_engram_ids = cluster.iter().map(|engram| engram.id).collect::<Vec<_>>();
             let mut prediction_fields = tags.iter().take(4).cloned().collect::<Vec<_>>();
-            if let Some(qwen) = qwen {
-                if let Ok(extraction) = extract_schema_fields(qwen, &cluster).await {
-                    if !extraction.prediction_fields.is_empty() {
-                        prediction_fields = extraction.prediction_fields;
-                    }
-                }
+            if let Some(qwen) = qwen
+                && let Ok(extraction) = extract_schema_fields(qwen, &cluster).await
+                && !extraction.prediction_fields.is_empty()
+            {
+                prediction_fields = extraction.prediction_fields;
             }
             let schema = MetaEngram {
                 id: uuid::Uuid::new_v4(),
@@ -362,7 +363,12 @@ async fn extract_schema_fields(
     let context = cluster
         .iter()
         .take(6)
-        .map(|engram| format!("tags: {:?}, content_ref: {:?}", engram.tags, engram.episodic_content_ref))
+        .map(|engram| {
+            format!(
+                "tags: {:?}, content_ref: {:?}",
+                engram.tags, engram.episodic_content_ref
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
 

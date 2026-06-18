@@ -1,18 +1,18 @@
 //! HTTP server for the Engram runtime.
 
-pub mod routes;
 pub mod mcp;
+pub mod routes;
 
 use axum::{
+    Router,
     body::Body,
     extract::Request,
     http::{HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::Response,
-    Router,
 };
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 
 pub use routes::AppState;
 
@@ -25,7 +25,8 @@ pub fn build_app(state: AppState) -> Router {
     };
     routes::router(state)
         .fallback_service(
-            ServeDir::new(web_root).not_found_service(ServeFile::new(format!("{web_root}/index.html"))),
+            ServeDir::new(web_root)
+                .not_found_service(ServeFile::new(format!("{web_root}/index.html"))),
         )
         .layer(middleware::from_fn(api_token_auth))
         .layer(cors_layer())
@@ -51,7 +52,10 @@ fn cors_layer() -> CorsLayer {
 }
 
 async fn api_token_auth(request: Request<Body>, next: Next) -> Result<Response, StatusCode> {
-    let Some(expected) = std::env::var("ENGRAM_API_TOKEN").ok().filter(|v| !v.is_empty()) else {
+    let Some(expected) = std::env::var("ENGRAM_API_TOKEN")
+        .ok()
+        .filter(|v| !v.is_empty())
+    else {
         return Ok(next.run(request).await);
     };
     if request.uri().path() == "/health" {

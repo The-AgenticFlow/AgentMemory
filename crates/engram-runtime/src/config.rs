@@ -383,30 +383,87 @@ impl RuntimeConfig {
     pub fn validate(&self) -> Result<(), String> {
         validate_unit("thalamus.novelty_weight", self.thalamus.novelty_weight)?;
         validate_unit("thalamus.surprise_weight", self.thalamus.surprise_weight)?;
-        validate_unit("thalamus.task_relevance_weight", self.thalamus.task_relevance_weight)?;
+        validate_unit(
+            "thalamus.task_relevance_weight",
+            self.thalamus.task_relevance_weight,
+        )?;
         validate_unit("thalamus.valence_weight", self.thalamus.valence_weight)?;
-        validate_unit("thalamus.exploration_threshold", self.thalamus.exploration_threshold)?;
-        validate_unit("thalamus.routine_threshold", self.thalamus.routine_threshold)?;
-        validate_unit("thalamus.critical_threshold", self.thalamus.critical_threshold)?;
-        validate_unit("thalamus.analogy_threshold", self.thalamus.analogy_threshold)?;
-        validate_unit("thalamus.validation_threshold", self.thalamus.validation_threshold)?;
-        validate_unit("buffer.similarity_threshold", self.buffer.similarity_threshold)?;
-        validate_unit("buffer.promotion_threshold", self.buffer.promotion_threshold)?;
+        validate_unit(
+            "thalamus.exploration_threshold",
+            self.thalamus.exploration_threshold,
+        )?;
+        validate_unit(
+            "thalamus.routine_threshold",
+            self.thalamus.routine_threshold,
+        )?;
+        validate_unit(
+            "thalamus.critical_threshold",
+            self.thalamus.critical_threshold,
+        )?;
+        validate_unit(
+            "thalamus.analogy_threshold",
+            self.thalamus.analogy_threshold,
+        )?;
+        validate_unit(
+            "thalamus.validation_threshold",
+            self.thalamus.validation_threshold,
+        )?;
+        validate_unit(
+            "buffer.similarity_threshold",
+            self.buffer.similarity_threshold,
+        )?;
+        validate_unit(
+            "buffer.promotion_threshold",
+            self.buffer.promotion_threshold,
+        )?;
         validate_unit("buffer.decay_rate", self.buffer.decay_rate)?;
-        validate_unit("pattern.completion_threshold", self.pattern.completion_threshold)?;
-        validate_unit("consolidation.active_threshold", self.consolidation.active_threshold)?;
-        validate_unit("consolidation.archive_threshold", self.consolidation.archive_threshold)?;
-        validate_unit("consolidation.schema_threshold", self.consolidation.schema_threshold)?;
-        validate_unit("consolidation.base_decay_rate", self.consolidation.base_decay_rate)?;
-        validate_unit("consolidation.valence_decay_factor", self.consolidation.valence_decay_factor)?;
-        validate_unit("consolidation.surprise_decay_factor", self.consolidation.surprise_decay_factor)?;
-        validate_unit("consolidation.pattern_eviction_threshold", self.consolidation.pattern_eviction_threshold)?;
-        validate_unit("consolidation.working_memory_min_strength", self.consolidation.working_memory_min_strength)?;
+        validate_unit(
+            "pattern.completion_threshold",
+            self.pattern.completion_threshold,
+        )?;
+        validate_unit(
+            "consolidation.active_threshold",
+            self.consolidation.active_threshold,
+        )?;
+        validate_unit(
+            "consolidation.archive_threshold",
+            self.consolidation.archive_threshold,
+        )?;
+        validate_unit(
+            "consolidation.schema_threshold",
+            self.consolidation.schema_threshold,
+        )?;
+        validate_unit(
+            "consolidation.base_decay_rate",
+            self.consolidation.base_decay_rate,
+        )?;
+        validate_unit(
+            "consolidation.valence_decay_factor",
+            self.consolidation.valence_decay_factor,
+        )?;
+        validate_unit(
+            "consolidation.surprise_decay_factor",
+            self.consolidation.surprise_decay_factor,
+        )?;
+        validate_unit(
+            "consolidation.pattern_eviction_threshold",
+            self.consolidation.pattern_eviction_threshold,
+        )?;
+        validate_unit(
+            "consolidation.working_memory_min_strength",
+            self.consolidation.working_memory_min_strength,
+        )?;
         if self.consolidation.archive_cleanup_days < 0 {
             return Err("consolidation.archive_cleanup_days must be >= 0".to_string());
         }
-        validate_unit("plasticity.surprise_multiplier", self.plasticity.surprise_multiplier)?;
-        validate_unit("plasticity.outcome_multiplier", self.plasticity.outcome_multiplier)?;
+        validate_unit(
+            "plasticity.surprise_multiplier",
+            self.plasticity.surprise_multiplier,
+        )?;
+        validate_unit(
+            "plasticity.outcome_multiplier",
+            self.plasticity.outcome_multiplier,
+        )?;
         validate_unit("plasticity.stress_penalty", self.plasticity.stress_penalty)?;
         if self.retrieval.top_k == 0 || self.retrieval.top_k > 100 {
             return Err("retrieval.top_k must be between 1 and 100".to_string());
@@ -423,21 +480,63 @@ impl RuntimeConfig {
         if self.pattern.separation_search_candidates == 0 {
             return Err("pattern.separation_search_candidates must be > 0".to_string());
         }
-        validate_unit("pattern.strength_merge_ratio", self.pattern.strength_merge_ratio)?;
-        validate_unit("pattern.min_strength_for_kinship", self.pattern.min_strength_for_kinship)?;
-        validate_unit("retrieval.keyword_tag_weight", self.retrieval.keyword_tag_weight)?;
-        validate_unit("retrieval.keyword_content_weight", self.retrieval.keyword_content_weight)?;
-        validate_unit("retrieval.schema_bonus_weight", self.retrieval.schema_bonus_weight)?;
-        validate_unit("plasticity.max_strength_delta", self.plasticity.max_strength_delta)?;
-        validate_unit("plasticity.high_plasticity_surprise_threshold", self.plasticity.high_plasticity_surprise_threshold)?;
-        validate_unit("plasticity.high_plasticity_valence_threshold", self.plasticity.high_plasticity_valence_threshold)?;
-        validate_unit("plasticity.decay_clamp_min", self.plasticity.decay_clamp_min)?;
-        validate_unit("plasticity.strength_clamp_min", self.plasticity.strength_clamp_min)?;
-        validate_unit("buffer.strength_base_coefficient", self.buffer.strength_base_coefficient)?;
+        validate_unit(
+            "pattern.strength_merge_ratio",
+            self.pattern.strength_merge_ratio,
+        )?;
+        validate_unit(
+            "pattern.min_strength_for_kinship",
+            self.pattern.min_strength_for_kinship,
+        )?;
+        validate_unit(
+            "retrieval.keyword_tag_weight",
+            self.retrieval.keyword_tag_weight,
+        )?;
+        validate_unit(
+            "retrieval.keyword_content_weight",
+            self.retrieval.keyword_content_weight,
+        )?;
+        validate_unit(
+            "retrieval.schema_bonus_weight",
+            self.retrieval.schema_bonus_weight,
+        )?;
+        validate_unit(
+            "plasticity.max_strength_delta",
+            self.plasticity.max_strength_delta,
+        )?;
+        validate_unit(
+            "plasticity.high_plasticity_surprise_threshold",
+            self.plasticity.high_plasticity_surprise_threshold,
+        )?;
+        validate_unit(
+            "plasticity.high_plasticity_valence_threshold",
+            self.plasticity.high_plasticity_valence_threshold,
+        )?;
+        validate_unit(
+            "plasticity.decay_clamp_min",
+            self.plasticity.decay_clamp_min,
+        )?;
+        validate_unit(
+            "plasticity.strength_clamp_min",
+            self.plasticity.strength_clamp_min,
+        )?;
+        validate_unit(
+            "buffer.strength_base_coefficient",
+            self.buffer.strength_base_coefficient,
+        )?;
         validate_unit("buffer.strength_min_base", self.buffer.strength_min_base)?;
-        validate_unit("buffer.surprise_contribution", self.buffer.surprise_contribution)?;
-        validate_unit("buffer.valence_contribution", self.buffer.valence_contribution)?;
-        validate_unit("buffer.threshold_sensitivity", self.buffer.threshold_sensitivity)?;
+        validate_unit(
+            "buffer.surprise_contribution",
+            self.buffer.surprise_contribution,
+        )?;
+        validate_unit(
+            "buffer.valence_contribution",
+            self.buffer.valence_contribution,
+        )?;
+        validate_unit(
+            "buffer.threshold_sensitivity",
+            self.buffer.threshold_sensitivity,
+        )?;
         Ok(())
     }
 

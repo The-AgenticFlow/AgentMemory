@@ -42,11 +42,9 @@ impl DashScopeConfig {
 
 use serde::de::DeserializeOwned;
 
-use crate::chat::{build_chat_request, ChatRequest, ChatResponse};
-use crate::embeddings::{
-    build_embedding_request, EmbeddingRequest, EmbeddingResponse,
-};
-use crate::rerank::{build_rerank_request, RerankRequest, RerankResponse};
+use crate::chat::{ChatRequest, ChatResponse, build_chat_request};
+use crate::embeddings::{EmbeddingRequest, EmbeddingResponse, build_embedding_request};
+use crate::rerank::{RerankRequest, RerankResponse, build_rerank_request};
 
 /// Thin HTTP wrapper around DashScope endpoints.
 #[derive(Debug, Clone)]
@@ -97,25 +95,25 @@ impl DashScopeClient {
     }
 
     /// Sends an embeddings request.
-    pub async fn embeddings(
-        &self,
-        request: &EmbeddingRequest,
-    ) -> Result<EmbeddingResponse> {
+    pub async fn embeddings(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
         let response = build_embedding_request(self, request).await?.send().await?;
-        Ok(response.error_for_status()?.json::<EmbeddingResponse>().await?)
+        Ok(response
+            .error_for_status()?
+            .json::<EmbeddingResponse>()
+            .await?)
     }
 
     /// Sends a rerank request.
     pub async fn rerank(&self, request: &RerankRequest) -> Result<RerankResponse> {
         let response = build_rerank_request(self, request).await?.send().await?;
-        Ok(response.error_for_status()?.json::<RerankResponse>().await?)
+        Ok(response
+            .error_for_status()?
+            .json::<RerankResponse>()
+            .await?)
     }
 
     /// Runs a structured JSON extraction through chat and parses the result.
-    pub async fn structured<T: DeserializeOwned>(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<T> {
+    pub async fn structured<T: DeserializeOwned>(&self, request: &ChatRequest) -> Result<T> {
         let response = self.chat(request).await?;
         let content = response
             .choices
@@ -126,7 +124,11 @@ impl DashScopeClient {
     }
 
     /// Sends a think-style prompt through the chat endpoint and returns text.
-    pub async fn thinking(&self, prompt: impl Into<String>, model: impl Into<String>) -> Result<String> {
+    pub async fn thinking(
+        &self,
+        prompt: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<String> {
         let request = ChatRequest::new(
             model,
             vec![crate::chat::ChatMessage {

@@ -5,6 +5,6 @@
 //! - `relevance`: Compute task relevance using semantic similarity.
 //! - `novelty`: Compute novelty by comparing to existing engrams.
 
-pub mod valence;
-pub mod relevance;
 pub mod novelty;
+pub mod relevance;
+pub mod valence;

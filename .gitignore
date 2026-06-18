@@ -4,3 +4,6 @@
 **/.agent-memory/**
 /web/dist/
 /web/node_modules/
+.codex/
+.pair-shared/
+.codex-home/

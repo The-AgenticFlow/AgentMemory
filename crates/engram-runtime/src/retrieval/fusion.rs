@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use engram_core::EngramEntry;
 use crate::config::FusionStrategy;
+use engram_core::EngramEntry;
 
 /// A single ranked item from one retrieval strategy.
 #[derive(Debug, Clone)]
@@ -29,15 +29,15 @@ impl RetrievalFusion {
     ) -> Vec<RankedItem> {
         match &strategy {
             FusionStrategy::ReciprocalRank => Self::rrf_fuse(results),
-            FusionStrategy::WeightedSum { weights } => Self::weighted_fuse(results, Some(weights.clone())),
+            FusionStrategy::WeightedSum { weights } => {
+                Self::weighted_fuse(results, Some(weights.clone()))
+            }
         }
     }
 
     /// Reciprocal Rank Fusion: score = Σ(1.0 / (k + rank)) for each list.
     /// Uses a constant k=60 to soften the impact of rank.
-    fn rrf_fuse(
-        results: Vec<HashMap<uuid::Uuid, (EngramEntry, f32)>>,
-    ) -> Vec<RankedItem> {
+    fn rrf_fuse(results: Vec<HashMap<uuid::Uuid, (EngramEntry, f32)>>) -> Vec<RankedItem> {
         let k: f32 = 60.0;
         let mut fused: HashMap<uuid::Uuid, (EngramEntry, f32)> = HashMap::new();
 
@@ -46,7 +46,9 @@ impl RetrievalFusion {
                 .iter()
                 .map(|(id, (engram, score))| (*id, engram, *score))
                 .collect();
-            ranked.sort_by(|(_, _, a), (_, _, b)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            ranked.sort_by(|(_, _, a), (_, _, b)| {
+                b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             for (rank, (id, engram, _)) in ranked.into_iter().enumerate() {
                 let rr = 1.0 / (k + (rank + 1) as f32);
@@ -65,7 +67,11 @@ impl RetrievalFusion {
                 source: "fused",
             })
             .collect();
-        output.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        output.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         output
     }
 
@@ -101,7 +107,11 @@ impl RetrievalFusion {
                 source: "fused",
             })
             .collect();
-        output.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        output.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         output
     }
 }
@@ -122,19 +132,15 @@ mod tests {
         let e2 = make_engram(Uuid::new_v4());
         let e3 = make_engram(Uuid::new_v4());
 
-        let list_a: HashMap<uuid::Uuid, (EngramEntry, f32)> = [
-            (e1.id, (e1.clone(), 0.9)),
-            (e2.id, (e2.clone(), 0.5)),
-        ]
-        .into_iter()
-        .collect();
+        let list_a: HashMap<uuid::Uuid, (EngramEntry, f32)> =
+            [(e1.id, (e1.clone(), 0.9)), (e2.id, (e2.clone(), 0.5))]
+                .into_iter()
+                .collect();
 
-        let list_b: HashMap<uuid::Uuid, (EngramEntry, f32)> = [
-            (e2.id, (e2.clone(), 0.8)),
-            (e3.id, (e3.clone(), 0.4)),
-        ]
-        .into_iter()
-        .collect();
+        let list_b: HashMap<uuid::Uuid, (EngramEntry, f32)> =
+            [(e2.id, (e2.clone(), 0.8)), (e3.id, (e3.clone(), 0.4))]
+                .into_iter()
+                .collect();
 
         let results = RetrievalFusion::fuse(FusionStrategy::ReciprocalRank, vec![list_a, list_b]);
         assert_eq!(results.len(), 3);
@@ -148,12 +154,18 @@ mod tests {
         let e2 = make_engram(Uuid::new_v4());
 
         let list_a: HashMap<uuid::Uuid, (EngramEntry, f32)> =
-            [(e1.id, (e1.clone(), 1.0)), (e2.id, (e2.clone(), 0.5))].into_iter().collect();
+            [(e1.id, (e1.clone(), 1.0)), (e2.id, (e2.clone(), 0.5))]
+                .into_iter()
+                .collect();
         let list_b: HashMap<uuid::Uuid, (EngramEntry, f32)> =
-            [(e1.id, (e1.clone(), 0.4)), (e2.id, (e2.clone(), 0.9))].into_iter().collect();
+            [(e1.id, (e1.clone(), 0.4)), (e2.id, (e2.clone(), 0.9))]
+                .into_iter()
+                .collect();
 
         let results = RetrievalFusion::fuse(
-            FusionStrategy::WeightedSum { weights: vec![0.5, 1.0] },
+            FusionStrategy::WeightedSum {
+                weights: vec![0.5, 1.0],
+            },
             vec![list_a, list_b],
         );
         // With weights [0.5, 1.0], e2 gets 0.25 + 0.9 = 1.15, e1 gets 0.5 + 0.4 = 0.9

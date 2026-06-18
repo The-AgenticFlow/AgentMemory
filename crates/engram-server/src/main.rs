@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use engram_qwen::{DashScopeClient, DashScopeConfig};
-use engram_server::{build_app, mcp, AppState};
+use engram_server::{AppState, build_app, mcp};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 

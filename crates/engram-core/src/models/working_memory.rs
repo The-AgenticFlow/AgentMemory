@@ -14,7 +14,6 @@
 /// - Written by the ingestion flow before buffer consideration.
 /// - Read by retrieval for immediate context.
 /// - Promoted to buffer when strength exceeds the consolidation trigger.
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

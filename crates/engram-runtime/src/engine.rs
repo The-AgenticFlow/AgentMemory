@@ -120,7 +120,7 @@ impl MemorySystem {
             neo4j: Neo4jMemoryStore::default(),
             qdrant: QdrantMemoryStore::default(),
             postgres: PostgresMemoryStore::default(),
-            oss: OssMemoryStore::default(),
+            oss: OssMemoryStore,
             qwen: None,
             thalamus: ThalamusFilterNode::default(),
             buffer: BufferIngestNode::default(),
@@ -145,9 +145,7 @@ impl MemorySystem {
         self.neo4j.initialize().await?;
         let config = if let Some(value) = self.postgres.get_config_profile().await? {
             match serde_json::from_value::<RuntimeConfig>(value) {
-                Ok(config) if config.validate().is_ok() => {
-                    config
-                }
+                Ok(config) if config.validate().is_ok() => config,
                 _ => {
                     tracing::warn!("stored runtime config is invalid; keeping defaults");
                     RuntimeConfig::default()
@@ -177,7 +175,11 @@ impl MemorySystem {
             .clone()
     }
 
-    pub async fn update_config(&self, actor: &str, mut config: RuntimeConfig) -> Result<RuntimeConfig> {
+    pub async fn update_config(
+        &self,
+        actor: &str,
+        mut config: RuntimeConfig,
+    ) -> Result<RuntimeConfig> {
         config.validate().map_err(anyhow::Error::msg)?;
         config.version = self.runtime_config().version.saturating_add(1);
         self.persist_config(actor, config.clone()).await?;
@@ -186,8 +188,10 @@ impl MemorySystem {
     }
 
     pub async fn reset_config(&self, actor: &str) -> Result<RuntimeConfig> {
-        let mut config = RuntimeConfig::default();
-        config.version = self.runtime_config().version.saturating_add(1);
+        let config = RuntimeConfig {
+            version: self.runtime_config().version.saturating_add(1),
+            ..RuntimeConfig::default()
+        };
         self.persist_config(actor, config.clone()).await?;
         *self.config.write().expect("RuntimeConfig lock poisoned") = config.clone();
         Ok(config)
@@ -202,8 +206,14 @@ impl MemorySystem {
             change: value.clone(),
             created_at: chrono::Utc::now(),
         };
-        self.postgres.save_config_profile(value.clone(), audit).await?;
-        if let Err(error) = self.neo4j.upsert_config(config.version, &value, actor).await {
+        self.postgres
+            .save_config_profile(value.clone(), audit)
+            .await?;
+        if let Err(error) = self
+            .neo4j
+            .upsert_config(config.version, &value, actor)
+            .await
+        {
             tracing::warn!("Neo4j config sync failed: {error}");
         }
         Ok(())
@@ -222,7 +232,10 @@ impl MemorySystem {
             Some(id) => Some(id),
             None => {
                 let banks = self.postgres.list_banks().await.unwrap_or_default();
-                banks.iter().find(|b| b.bank_type == engram_core::BankType::Shared).map(|b| b.id)
+                banks
+                    .iter()
+                    .find(|b| b.bank_type == engram_core::BankType::Shared)
+                    .map(|b| b.id)
             }
         };
         let session = Session::new(user_id, bank_id, expectation, mode, task_context);
@@ -286,7 +299,11 @@ impl MemorySystem {
         outcome: impl Into<String>,
     ) -> Result<IngestionOutcome> {
         let episode = Episode::with_bank(
-            action, context, outcome, handle.session.id, handle.session.bank_id,
+            action,
+            context,
+            outcome,
+            handle.session.id,
+            handle.session.bank_id,
         );
         let config = self.runtime_config();
         let scores = self
@@ -378,7 +395,11 @@ impl MemorySystem {
         if let Err(error) = self.neo4j.upsert_pattern(&pattern, handle.session.id).await {
             tracing::warn!("Neo4j pattern sync failed: {error}");
         }
-        if let Err(error) = self.neo4j.upsert_engram(&decision.engram, Some(&pattern.pattern_hash)).await {
+        if let Err(error) = self
+            .neo4j
+            .upsert_engram(&decision.engram, Some(&pattern.pattern_hash))
+            .await
+        {
             tracing::warn!("Neo4j engram sync failed: {error}");
         }
 
@@ -394,7 +415,8 @@ impl MemorySystem {
     /// Runs nightly consolidation over the current memory stores.
     pub async fn consolidate(&self) -> Result<Vec<MetaEngram>> {
         let config = self.runtime_config();
-        let created = self.consolidation
+        let created = self
+            .consolidation
             .with_config(&config.consolidation)
             .run(&self.qdrant, &self.postgres, self.qwen.as_ref())
             .await?;
@@ -502,7 +524,11 @@ impl MemorySystem {
         if let Some(bank_id) = bank_id {
             return Ok(MemoryCounts {
                 sessions: self.postgres.list_sessions_by_bank(bank_id).await?.len(),
-                working_contexts: self.postgres.list_working_contexts_by_bank(bank_id).await?.len(),
+                working_contexts: self
+                    .postgres
+                    .list_working_contexts_by_bank(bank_id)
+                    .await?
+                    .len(),
                 episodes: self.postgres.list_episodes_by_bank(bank_id).await?.len(),
                 patterns: self.qdrant.list_patterns_by_bank(bank_id).await?.len(),
                 engrams: self.qdrant.list_engrams_by_bank(bank_id).await?.len(),
@@ -525,8 +551,10 @@ impl MemorySystem {
         } else {
             self.postgres.list_sessions().await?
         };
-        let _session_ids: std::collections::HashSet<uuid::Uuid> = sessions.iter().map(|s| s.id).collect();
-        let _bank_ids: std::collections::HashSet<uuid::Uuid> = sessions.iter().filter_map(|s| s.bank_id).collect();
+        let _session_ids: std::collections::HashSet<uuid::Uuid> =
+            sessions.iter().map(|s| s.id).collect();
+        let _bank_ids: std::collections::HashSet<uuid::Uuid> =
+            sessions.iter().filter_map(|s| s.bank_id).collect();
 
         let contexts: Vec<engram_core::WorkingContext> = if let Some(bank_id) = bank_id {
             self.postgres.list_working_contexts_by_bank(bank_id).await?
@@ -632,7 +660,8 @@ impl MemorySystem {
         }
 
         // Only keep edges whose source and target both exist in the scoped node set.
-        let node_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+        let node_ids: std::collections::HashSet<String> =
+            nodes.iter().map(|n| n.id.clone()).collect();
         let edges: Vec<ControlGraphEdge> = candidate_edges
             .into_iter()
             .filter(|e| node_ids.contains(&e.source) && node_ids.contains(&e.target))

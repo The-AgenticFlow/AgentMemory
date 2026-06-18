@@ -7,9 +7,9 @@ use anyhow::Result;
 use engram_core::{EngramEntry, EngramSource, PatternEntry, PatternSource, PatternState, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
+use crate::config::PatternConfig;
 use crate::embeddings::cosine_similarity;
 use crate::types::RetrievalCandidate;
-use crate::config::PatternConfig;
 
 /// Result of a separation/completion decision.
 #[derive(Debug, Clone)]
@@ -65,8 +65,9 @@ impl PatternSepCompNode {
         adjusted_threshold: f32,
     ) -> Result<PatternDecision> {
         let search_budget = self.separation_search_candidates;
-        let matches: Vec<Scored<EngramEntry>> =
-            qdrant.search_engrams(&pattern.embedding, search_budget).await?;
+        let matches: Vec<Scored<EngramEntry>> = qdrant
+            .search_engrams(&pattern.embedding, search_budget)
+            .await?;
         let best = matches.first().cloned();
         let effective_threshold = adjusted_threshold.clamp(0.0, 1.0);
 
@@ -76,20 +77,25 @@ impl PatternSepCompNode {
                 engram.tags.extend(pattern.context_tags.clone());
                 engram.tags.sort();
                 engram.tags.dedup();
-                engram.strength = (engram.strength + pattern.strength * self.strength_merge_ratio).clamp(0.0, 1.0);
+                engram.strength = (engram.strength + pattern.strength * self.strength_merge_ratio)
+                    .clamp(0.0, 1.0);
                 engram.touch();
                 let prev = engram.thalamus_scores;
                 engram.thalamus_scores = engram_core::ThalamusScores {
                     novelty: (prev.novelty + pattern.thalamus_scores.novelty) / 2.0,
                     surprise: (prev.surprise + pattern.thalamus_scores.surprise) / 2.0,
-                    task_relevance: (prev.task_relevance + pattern.thalamus_scores.task_relevance) / 2.0,
-                    emotional_valence: (prev.emotional_valence + pattern.thalamus_scores.emotional_valence) / 2.0,
+                    task_relevance: (prev.task_relevance + pattern.thalamus_scores.task_relevance)
+                        / 2.0,
+                    emotional_valence: (prev.emotional_valence
+                        + pattern.thalamus_scores.emotional_valence)
+                        / 2.0,
                 };
                 engram.bank_id = pattern.bank_id;
-                if let Some(ref existing) = engram.episodic_content_ref {
-                    if !existing.contains(&pattern.content) {
-                        engram.episodic_content_ref = Some(format!("{}; {}", existing, pattern.content));
-                    }
+                if let Some(ref existing) = engram.episodic_content_ref
+                    && !existing.contains(&pattern.content)
+                {
+                    engram.episodic_content_ref =
+                        Some(format!("{}; {}", existing, pattern.content));
                 }
                 qdrant.upsert_engram(&engram).await?;
                 postgres.save_engram(&engram).await?;
@@ -99,7 +105,10 @@ impl PatternSepCompNode {
                     similarity: candidate.similarity,
                 }
             }
-            Some(candidate) if self.kinship_link_enabled && pattern.strength >= self.min_strength_for_kinship => {
+            Some(candidate)
+                if self.kinship_link_enabled
+                    && pattern.strength >= self.min_strength_for_kinship =>
+            {
                 let mut engram = EngramEntry::new(
                     pattern.embedding.clone(),
                     pattern.context_tags.clone(),

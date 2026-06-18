@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use engram_core::{EngramEntry, Episode, MetaEngram, PatternEntry, Session, WorkingContext};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// Runtime Neo4j connection settings.
@@ -27,8 +27,10 @@ impl Neo4jConfig {
         Some(Self {
             uri,
             user: std::env::var("ENGRAM_NEO4J_USER").unwrap_or_else(|_| "neo4j".to_string()),
-            password: std::env::var("ENGRAM_NEO4J_PASSWORD").unwrap_or_else(|_| "engram-memory".to_string()),
-            database: std::env::var("ENGRAM_NEO4J_DATABASE").unwrap_or_else(|_| "neo4j".to_string()),
+            password: std::env::var("ENGRAM_NEO4J_PASSWORD")
+                .unwrap_or_else(|_| "engram-memory".to_string()),
+            database: std::env::var("ENGRAM_NEO4J_DATABASE")
+                .unwrap_or_else(|_| "neo4j".to_string()),
         })
     }
 
@@ -201,7 +203,11 @@ impl Neo4jMemoryStore {
         .await
     }
 
-    pub async fn upsert_engram(&self, engram: &EngramEntry, pattern_hash: Option<&str>) -> Result<()> {
+    pub async fn upsert_engram(
+        &self,
+        engram: &EngramEntry,
+        pattern_hash: Option<&str>,
+    ) -> Result<()> {
         self.execute(
             "MATCH (s:Session {id: $session_ref})
              MERGE (g:Engram {id: $id})
@@ -304,7 +310,8 @@ impl Neo4jMemoryStore {
                 .await
             {
                 Ok(response) => {
-                    let payload: Neo4jResponse = response.json().await.context("parsing Neo4j response")?;
+                    let payload: Neo4jResponse =
+                        response.json().await.context("parsing Neo4j response")?;
                     if payload.errors.is_empty() {
                         return Ok(());
                     }
@@ -323,7 +330,8 @@ impl Neo4jMemoryStore {
                         backoff = (backoff * 2).min(max_backoff);
                         continue;
                     }
-                    return Err(err).with_context(|| format!("connecting to Neo4j at {}", config.uri));
+                    return Err(err)
+                        .with_context(|| format!("connecting to Neo4j at {}", config.uri));
                 }
             }
         }

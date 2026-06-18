@@ -113,9 +113,8 @@ impl PlasticityProfile {
             Some(last) => (Utc::now() - last).num_hours() <= self.reconsolidation_window_hours,
             None => true,
         };
-        let high_plasticity =
-            scores.surprise >= self.high_plasticity_surprise_threshold
-                || (scores.emotional_valence > self.high_plasticity_valence_threshold && !stress);
+        let high_plasticity = scores.surprise >= self.high_plasticity_surprise_threshold
+            || (scores.emotional_valence > self.high_plasticity_valence_threshold && !stress);
 
         PlasticitySignal {
             strength_multiplier,
@@ -127,7 +126,8 @@ impl PlasticityProfile {
 
     /// Applies the signal to a base strength delta.
     pub fn strength_delta(&self, base_delta: f32, signal: PlasticitySignal) -> f32 {
-        (base_delta * signal.strength_multiplier).clamp(self.strength_clamp_min, self.max_strength_delta)
+        (base_delta * signal.strength_multiplier)
+            .clamp(self.strength_clamp_min, self.max_strength_delta)
     }
 
     /// Applies the signal to a base decay rate.

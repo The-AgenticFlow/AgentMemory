@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use engram_core::{BankType, EngramEntry, Episode, MemoryBank, MetaEngram, Session, WorkingContext, WorkingMemoryEntry};
+use engram_core::{
+    BankType, EngramEntry, Episode, MemoryBank, MetaEngram, Session, WorkingContext,
+    WorkingMemoryEntry,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -117,13 +120,21 @@ impl PostgresMemoryStore {
     /// Persists one raw episode record for dashboard inspection.
     pub async fn save_episode(&self, episode: &Episode) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.episodes, episode.clone(), |entry: &Episode| entry.id);
+        upsert_by_id(
+            &mut snapshot.episodes,
+            episode.clone(),
+            |entry: &Episode| entry.id,
+        );
         self.persist(snapshot).await
     }
 
     /// Returns one session by id if it exists.
     pub async fn get_session(&self, id: Uuid) -> Result<Option<Session>> {
-        Ok(self.snapshot().sessions.into_iter().find(|session| session.id == id))
+        Ok(self
+            .snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == id))
     }
 
     /// Returns all stored schemas.
@@ -148,14 +159,22 @@ impl PostgresMemoryStore {
     /// Persists a structured ingestion score record.
     pub async fn save_ingestion_record(&self, record: &IngestionRecord) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.ingestion_records, record.clone(), |entry: &IngestionRecord| entry.id);
+        upsert_by_id(
+            &mut snapshot.ingestion_records,
+            record.clone(),
+            |entry: &IngestionRecord| entry.id,
+        );
         self.persist(snapshot).await
     }
 
     /// Persists an engram's relational metadata.
     pub async fn save_engram(&self, engram: &EngramEntry) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.engrams, engram.clone(), |entry: &EngramEntry| entry.id);
+        upsert_by_id(
+            &mut snapshot.engrams,
+            engram.clone(),
+            |entry: &EngramEntry| entry.id,
+        );
         self.persist(snapshot).await
     }
 
@@ -171,7 +190,9 @@ impl PostgresMemoryStore {
         let mut snapshot = self.snapshot();
         let before = snapshot.schemas.len();
         for schema in &mut snapshot.schemas {
-            schema.source_engram_ids.retain(|id| !deleted_engram_ids.contains(id));
+            schema
+                .source_engram_ids
+                .retain(|id| !deleted_engram_ids.contains(id));
         }
         snapshot.schemas.retain(|s| !s.source_engram_ids.is_empty());
         let removed = before - snapshot.schemas.len();
@@ -182,14 +203,22 @@ impl PostgresMemoryStore {
     /// Persists a schema or meta-engram record.
     pub async fn save_schema(&self, schema: &MetaEngram) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.schemas, schema.clone(), |entry: &MetaEngram| entry.id);
+        upsert_by_id(
+            &mut snapshot.schemas,
+            schema.clone(),
+            |entry: &MetaEngram| entry.id,
+        );
         self.persist(snapshot).await
     }
 
     /// Persists session state.
     pub async fn save_session(&self, session: &Session) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.sessions, session.clone(), |entry: &Session| entry.id);
+        upsert_by_id(
+            &mut snapshot.sessions,
+            session.clone(),
+            |entry: &Session| entry.id,
+        );
         self.persist(snapshot).await
     }
 
@@ -210,7 +239,10 @@ impl PostgresMemoryStore {
     }
 
     /// Returns working contexts scoped to a specific bank.
-    pub async fn list_working_contexts_by_bank(&self, bank_id: Uuid) -> Result<Vec<WorkingContext>> {
+    pub async fn list_working_contexts_by_bank(
+        &self,
+        bank_id: Uuid,
+    ) -> Result<Vec<WorkingContext>> {
         let contexts: Vec<WorkingContext> = self
             .snapshot()
             .working_contexts
@@ -265,10 +297,18 @@ impl PostgresMemoryStore {
             .collect();
         snapshot.sessions.retain(|s| s.id != session_id);
         snapshot.episodes.retain(|e| e.session_id != session_id);
-        snapshot.working_contexts.retain(|c| c.session_id != session_id);
+        snapshot
+            .working_contexts
+            .retain(|c| c.session_id != session_id);
         snapshot.engrams.retain(|e| e.session_ref != session_id);
-        snapshot.ingestion_records.retain(|r| r.session_id != session_id);
-        snapshot.schemas.retain(|s| !s.source_engram_ids.iter().any(|eid| deleted_engram_ids.contains(eid)));
+        snapshot
+            .ingestion_records
+            .retain(|r| r.session_id != session_id);
+        snapshot.schemas.retain(|s| {
+            !s.source_engram_ids
+                .iter()
+                .any(|eid| deleted_engram_ids.contains(eid))
+        });
         self.persist(snapshot).await
     }
 
@@ -276,12 +316,20 @@ impl PostgresMemoryStore {
 
     pub async fn save_bank(&self, bank: &MemoryBank) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.memory_banks, bank.clone(), |entry: &MemoryBank| entry.id);
+        upsert_by_id(
+            &mut snapshot.memory_banks,
+            bank.clone(),
+            |entry: &MemoryBank| entry.id,
+        );
         self.persist(snapshot).await
     }
 
     pub async fn get_bank(&self, id: Uuid) -> Result<Option<MemoryBank>> {
-        Ok(self.snapshot().memory_banks.into_iter().find(|b| b.id == id))
+        Ok(self
+            .snapshot()
+            .memory_banks
+            .into_iter()
+            .find(|b| b.id == id))
     }
 
     pub async fn find_bank_by_name(&self, name: &str) -> Result<Option<MemoryBank>> {
@@ -398,7 +446,10 @@ impl PostgresMemoryStore {
         Ok(entries)
     }
 
-    pub async fn list_working_memory_by_session(&self, session_id: Uuid) -> Result<Vec<WorkingMemoryEntry>> {
+    pub async fn list_working_memory_by_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Vec<WorkingMemoryEntry>> {
         Ok(self
             .snapshot()
             .working_memory
@@ -407,7 +458,10 @@ impl PostgresMemoryStore {
             .collect())
     }
 
-    pub async fn list_working_memory_by_bank(&self, bank_id: Uuid) -> Result<Vec<WorkingMemoryEntry>> {
+    pub async fn list_working_memory_by_bank(
+        &self,
+        bank_id: Uuid,
+    ) -> Result<Vec<WorkingMemoryEntry>> {
         Ok(self
             .snapshot()
             .working_memory
@@ -422,7 +476,10 @@ impl PostgresMemoryStore {
         self.persist(snapshot).await
     }
 
-    pub async fn expire_working_memory(&self, min_strength: f32) -> Result<Vec<WorkingMemoryEntry>> {
+    pub async fn expire_working_memory(
+        &self,
+        min_strength: f32,
+    ) -> Result<Vec<WorkingMemoryEntry>> {
         let mut snapshot = self.snapshot();
         let expired: Vec<WorkingMemoryEntry> = snapshot
             .working_memory
@@ -430,7 +487,9 @@ impl PostgresMemoryStore {
             .filter(|e| e.should_expire(min_strength))
             .cloned()
             .collect();
-        snapshot.working_memory.retain(|e| !e.should_expire(min_strength));
+        snapshot
+            .working_memory
+            .retain(|e| !e.should_expire(min_strength));
         self.persist(snapshot).await?;
         Ok(expired)
     }
@@ -474,8 +533,7 @@ fn load_snapshot(path: &Path) -> Result<PostgresSnapshot> {
     }
 
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing {}", path.display()))?)
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
 }
 
 async fn write_snapshot(path: &Path, snapshot: &PostgresSnapshot) -> Result<()> {

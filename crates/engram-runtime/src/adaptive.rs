@@ -5,8 +5,8 @@
 
 use engram_core::{RetrievalState, SessionMode};
 
-use crate::types::RetrievalOutcome;
 use crate::config::AdaptiveConfig;
+use crate::types::RetrievalOutcome;
 
 /// Small mutable state used to bias retrieval and completion decisions.
 #[derive(Debug, Clone)]
@@ -113,12 +113,15 @@ impl AdaptiveThresholdState {
 
     /// Updates the adaptive biases from the latest retrieval outcome.
     pub fn update_from_retrieval(&mut self, outcome: &RetrievalOutcome) {
-        self.update_from_retrieval_with_config(outcome, &AdaptiveConfig {
-            completion_bias_min: -0.15,
-            completion_bias_max: 0.15,
-            retrieval_bias_min: -0.10,
-            retrieval_bias_max: 0.10,
-        });
+        self.update_from_retrieval_with_config(
+            outcome,
+            &AdaptiveConfig {
+                completion_bias_min: -0.15,
+                completion_bias_max: 0.15,
+                retrieval_bias_min: -0.10,
+                retrieval_bias_max: 0.10,
+            },
+        );
     }
 
     /// Updates adaptive biases using dashboard-configured bounds.

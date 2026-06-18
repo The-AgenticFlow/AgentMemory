@@ -67,6 +67,7 @@ pub enum PatternSource {
 
 impl PatternEntry {
     /// Creates the first buffered representation of a repeated signal.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pattern_hash: impl Into<String>,
         embedding: Vec<f32>,
@@ -77,10 +78,21 @@ impl PatternEntry {
         source: PatternSource,
         episode_ref: Uuid,
     ) -> Self {
-        Self::with_bank(pattern_hash, embedding, context_tags, content, threshold, decay_rate, source, episode_ref, None)
+        Self::with_bank(
+            pattern_hash,
+            embedding,
+            context_tags,
+            content,
+            threshold,
+            decay_rate,
+            source,
+            episode_ref,
+            None,
+        )
     }
 
     /// Creates the first buffered representation with an explicit bank context.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_bank(
         pattern_hash: impl Into<String>,
         embedding: Vec<f32>,

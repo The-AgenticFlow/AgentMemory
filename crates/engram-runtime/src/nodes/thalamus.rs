@@ -6,11 +6,11 @@
 
 use engram_core::{EngramEntry, Episode, Session, SessionMode, ThalamusScores};
 
+use crate::TaskRelevanceMode;
 use crate::config::ThalamusConfig;
-use crate::scoring::valence::{keyword_valence_score, ValenceScorer};
 use crate::scoring::novelty::novelty_score_semantic;
 use crate::scoring::relevance::{TaskRelevanceScorer, string_overlap};
-use crate::TaskRelevanceMode;
+use crate::scoring::valence::{ValenceScorer, keyword_valence_score};
 
 /// Full assessment produced by the thalamus filter.
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +88,9 @@ impl ThalamusFilterNode {
         config: &ThalamusConfig,
     ) -> ThalamusAssessment {
         let task_relevance = match config.task_relevance_mode {
-            TaskRelevanceMode::TokenOverlap => string_overlap(&episode.context, &session.task_context),
+            TaskRelevanceMode::TokenOverlap => {
+                string_overlap(&episode.context, &session.task_context)
+            }
             TaskRelevanceMode::Semantic => {
                 let scorer = TaskRelevanceScorer::new(TaskRelevanceMode::Semantic);
                 scorer.score(&episode.context, &session.task_context)
@@ -173,7 +175,7 @@ mod tests {
     #[test]
     fn analogy_mode_uses_correct_threshold() {
         let config = ThalamusConfig::default();
-        let node = ThalamusFilterNode::default();
+        let _node = ThalamusFilterNode::default();
         assert_eq!(config.analogy_threshold, 0.3);
     }
 

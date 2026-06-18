@@ -10,10 +10,12 @@ use engram_core::{EngramEntry, MetaEngram, Session};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore, Scored};
 
 use crate::adaptive::AdaptiveThresholdState;
-use crate::config::{RetrievalConfig, FusionStrategy};
+use crate::config::{FusionStrategy, RetrievalConfig};
 use crate::embeddings::{cosine_similarity, embed_text};
 use crate::nodes::schema::SchemaActivationNode;
-use crate::retrieval::{Bm25Params, Bm25Retrieval, TemporalParams, TemporalRetrieval, RetrievalFusion};
+use crate::retrieval::{
+    Bm25Params, Bm25Retrieval, RetrievalFusion, TemporalParams, TemporalRetrieval,
+};
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
 
 /// Top-level retrieval node that performs schema-guided search.
@@ -92,7 +94,7 @@ impl RetrievalArchitectureNode {
         adaptive: &AdaptiveThresholdState,
     ) -> Result<RetrievalOutcome> {
         let query_embedding = embed_text(&query);
-        let schema_node = SchemaActivationNode::default();
+        let schema_node = SchemaActivationNode;
         let schema = schema_node.activate(&query_embedding, postgres).await?;
         let schema_prediction = schema
             .as_ref()
@@ -134,47 +136,55 @@ impl RetrievalArchitectureNode {
         };
 
         // Strategy 3: Temporal search (optional)
-        let temporal_results: HashMap<uuid::Uuid, (EngramEntry, f32)> = if self.use_temporal_search {
+        let temporal_results: HashMap<uuid::Uuid, (EngramEntry, f32)> = if self.use_temporal_search
+        {
             self.run_temporal(qdrant).await?
         } else {
             HashMap::new()
         };
 
         // Fuse results if multi-strategy is enabled
-        let mut candidates: Vec<RetrievalCandidate> = if self.use_bm25_search || self.use_temporal_search {
-            let fused = RetrievalFusion::fuse(
-                self.fusion_strategy.clone(),
-                vec![semantic_results, bm25_results, temporal_results],
-            );
-            fused.into_iter().map(|item| RetrievalCandidate {
-                engram: item.engram,
-                similarity: item.score.clamp(0.0, 1.0),
-            }).collect()
-        } else {
-            semantic_results.into_iter().map(|(_, (engram, score))| RetrievalCandidate {
-                engram,
-                similarity: score,
-            }).collect()
-        };
+        let mut candidates: Vec<RetrievalCandidate> =
+            if self.use_bm25_search || self.use_temporal_search {
+                let fused = RetrievalFusion::fuse(
+                    self.fusion_strategy.clone(),
+                    vec![semantic_results, bm25_results, temporal_results],
+                );
+                fused
+                    .into_iter()
+                    .map(|item| RetrievalCandidate {
+                        engram: item.engram,
+                        similarity: item.score.clamp(0.0, 1.0),
+                    })
+                    .collect()
+            } else {
+                semantic_results
+                    .into_iter()
+                    .map(|(_, (engram, score))| RetrievalCandidate {
+                        engram,
+                        similarity: score,
+                    })
+                    .collect()
+            };
 
         // Kinship spread
         let mut spread_candidates = Vec::new();
         for candidate in &candidates {
-            if let Some(kinship_ref) = candidate.engram.kinship_ref {
-                if let Some(kinship) = qdrant.get_engram(kinship_ref).await? {
-                    let spread = self.spread_factor(retrieval_mode);
-                    let similarity = self.adjust_similarity(
-                        cosine_similarity(&kinship.embedding, &query_embedding) * spread,
-                        &query,
-                        &kinship.tags,
-                        schema.as_ref(),
-                        retrieval_mode,
-                    );
-                    spread_candidates.push(RetrievalCandidate {
-                        engram: kinship,
-                        similarity,
-                    });
-                }
+            if let Some(kinship_ref) = candidate.engram.kinship_ref
+                && let Some(kinship) = qdrant.get_engram(kinship_ref).await?
+            {
+                let spread = self.spread_factor(retrieval_mode);
+                let similarity = self.adjust_similarity(
+                    cosine_similarity(&kinship.embedding, &query_embedding) * spread,
+                    &query,
+                    &kinship.tags,
+                    schema.as_ref(),
+                    retrieval_mode,
+                );
+                spread_candidates.push(RetrievalCandidate {
+                    engram: kinship,
+                    similarity,
+                });
             }
         }
         candidates.extend(spread_candidates);
@@ -291,7 +301,9 @@ impl RetrievalArchitectureNode {
             .iter()
             .filter(|tag| {
                 let tag_lower = tag.to_lowercase();
-                query_terms.iter().any(|term| content_contains_word(&tag_lower, term))
+                query_terms
+                    .iter()
+                    .any(|term| content_contains_word(&tag_lower, term))
             })
             .count() as f32;
 
@@ -314,9 +326,10 @@ impl RetrievalArchitectureNode {
         };
         let mode_bonus = self.mode_bonuses.get(mode_key).copied().unwrap_or(0.0);
 
-        let keyword_boost =
-            (tag_overlap * self.keyword_tag_weight) + (content_overlap * self.keyword_content_weight);
-        (similarity + keyword_boost + schema_bonus * self.schema_bonus_weight + mode_bonus).clamp(0.0, 1.0)
+        let keyword_boost = (tag_overlap * self.keyword_tag_weight)
+            + (content_overlap * self.keyword_content_weight);
+        (similarity + keyword_boost + schema_bonus * self.schema_bonus_weight + mode_bonus)
+            .clamp(0.0, 1.0)
     }
 
     /// Builds the final transparent knowledge payload from actual memory content.

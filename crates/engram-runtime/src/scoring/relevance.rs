@@ -3,8 +3,8 @@
 //! Computes how relevant a piece of context is to a task by comparing
 //! their semantic embeddings. Replaces simple token-overlap heuristics.
 
-use crate::embeddings::{cosine_similarity, embed_text};
 use crate::config::TaskRelevanceMode;
+use crate::embeddings::{cosine_similarity, embed_text};
 
 /// Scorer that computes task relevance between a context and a task description.
 pub struct TaskRelevanceScorer {
@@ -63,8 +63,11 @@ mod tests {
     #[test]
     fn semantic_score_returns_value_between_0_and_1() {
         let scorer = TaskRelevanceScorer::new(TaskRelevanceMode::Semantic);
-        let score = scorer.score("machine learning model training", "machine learning research");
-        assert!(score >= 0.0 && score <= 1.0);
+        let score = scorer.score(
+            "machine learning model training",
+            "machine learning research",
+        );
+        assert!((0.0..=1.0).contains(&score));
     }
 
     #[test]
@@ -82,8 +85,16 @@ mod tests {
     #[test]
     fn semantic_higher_for_related_topics() {
         let scorer = TaskRelevanceScorer::new(TaskRelevanceMode::Semantic);
-        let related = scorer.score("rust programming language memory safety", "rust memory management");
+        let related = scorer.score(
+            "rust programming language memory safety",
+            "rust memory management",
+        );
         let unrelated = scorer.score("rust programming language", "cooking recipe for pasta");
-        assert!(related > unrelated, "related={:.3}, unrelated={:.3}", related, unrelated);
+        assert!(
+            related > unrelated,
+            "related={:.3}, unrelated={:.3}",
+            related,
+            unrelated
+        );
     }
 }

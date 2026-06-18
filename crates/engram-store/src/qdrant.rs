@@ -104,13 +104,21 @@ impl QdrantMemoryStore {
 
     /// Returns one engram by id if it exists.
     pub async fn get_engram(&self, id: Uuid) -> Result<Option<EngramEntry>> {
-        Ok(self.snapshot().engrams.into_iter().find(|engram| engram.id == id))
+        Ok(self
+            .snapshot()
+            .engrams
+            .into_iter()
+            .find(|engram| engram.id == id))
     }
 
     /// Persists or updates a consolidated engram in Qdrant.
     pub async fn upsert_engram(&self, engram: &EngramEntry) -> Result<()> {
         let mut snapshot = self.snapshot();
-        upsert_by_id(&mut snapshot.engrams, engram.clone(), |entry: &EngramEntry| entry.id);
+        upsert_by_id(
+            &mut snapshot.engrams,
+            engram.clone(),
+            |entry: &EngramEntry| entry.id,
+        );
         self.persist(snapshot).await
     }
 
@@ -170,10 +178,7 @@ impl QdrantMemoryStore {
 
     async fn persist(&self, snapshot: QdrantSnapshot) -> Result<()> {
         let path = {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("QdrantMemoryStore mutex poisoned");
+            let mut inner = self.inner.lock().expect("QdrantMemoryStore mutex poisoned");
             inner.snapshot = snapshot;
             inner.path.clone()
         };
@@ -199,8 +204,7 @@ fn load_snapshot(path: &Path) -> Result<QdrantSnapshot> {
     }
 
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing {}", path.display()))?)
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))
 }
 
 async fn write_snapshot(path: &Path, snapshot: &QdrantSnapshot) -> Result<()> {

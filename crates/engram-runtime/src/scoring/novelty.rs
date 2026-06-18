@@ -11,10 +11,7 @@ use crate::embeddings::{cosine_similarity, embed_text};
 ///
 /// Returns a value in [0, 1] where 1.0 is completely novel and 0.0 means
 /// the text is very similar to existing memories.
-pub fn novelty_score_semantic(
-    text: &str,
-    recent_engrams: &[EngramEntry],
-) -> f32 {
+pub fn novelty_score_semantic(text: &str, recent_engrams: &[EngramEntry]) -> f32 {
     if recent_engrams.is_empty() {
         return 1.0;
     }

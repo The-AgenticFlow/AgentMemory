@@ -94,14 +94,14 @@ impl PostgresMemoryStore {
     /// Returns all stored sessions ordered by most recent update.
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         let mut sessions = self.snapshot().sessions;
-        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        sessions.sort_by_key(|right| std::cmp::Reverse(right.updated_at));
         Ok(sessions)
     }
 
     /// Returns all stored episodes ordered by most recent creation.
     pub async fn list_episodes(&self) -> Result<Vec<Episode>> {
         let mut episodes = self.snapshot().episodes;
-        episodes.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        episodes.sort_by_key(|right| std::cmp::Reverse(right.created_at));
         Ok(episodes)
     }
 
@@ -113,7 +113,7 @@ impl PostgresMemoryStore {
             .into_iter()
             .filter(|e| e.bank_id == Some(bank_id))
             .collect();
-        episodes.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        episodes.sort_by_key(|right| std::cmp::Reverse(right.created_at));
         Ok(episodes)
     }
 
@@ -145,14 +145,14 @@ impl PostgresMemoryStore {
     /// Returns all stored engram metadata ordered by creation time.
     pub async fn list_engrams(&self) -> Result<Vec<EngramEntry>> {
         let mut engrams = self.snapshot().engrams;
-        engrams.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        engrams.sort_by_key(|right| std::cmp::Reverse(right.created_at));
         Ok(engrams)
     }
 
     /// Returns ingestion score records ordered by newest first.
     pub async fn list_ingestion_records(&self) -> Result<Vec<IngestionRecord>> {
         let mut records = self.snapshot().ingestion_records;
-        records.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        records.sort_by_key(|right| std::cmp::Reverse(right.created_at));
         Ok(records)
     }
 
@@ -272,7 +272,7 @@ impl PostgresMemoryStore {
     /// Returns config audit history ordered newest first.
     pub async fn list_config_audit(&self) -> Result<Vec<ConfigAuditRecord>> {
         let mut audit = self.snapshot().config_audit;
-        audit.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        audit.sort_by_key(|right| std::cmp::Reverse(right.created_at));
         Ok(audit)
     }
 
@@ -342,7 +342,7 @@ impl PostgresMemoryStore {
 
     pub async fn list_banks(&self) -> Result<Vec<MemoryBank>> {
         let mut banks = self.snapshot().memory_banks;
-        banks.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        banks.sort_by_key(|right| std::cmp::Reverse(right.updated_at));
         Ok(banks)
     }
 

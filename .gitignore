@@ -10,3 +10,4 @@
 .pair-shared/.codex/
 .claude/
 .env.local
+caddy/certs/

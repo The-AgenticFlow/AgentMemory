@@ -1,3 +1,5 @@
 {$ENGRAM_DOMAIN:localhost} {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
+
 	reverse_proxy engram:3001
 }

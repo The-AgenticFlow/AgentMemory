@@ -289,15 +289,46 @@ impl RetrievalArchitectureNode {
             .filter(|t| t.len() > 2)
             .collect();
 
-        let tag_overlap = tags
-            .iter()
-            .filter(|tag| {
-                let tag_lower = tag.to_lowercase();
-                query_terms.iter().any(|term| tag_lower.contains(term))
-            })
-            .count() as f32;
+        // Also build compound terms from adjacent query words for matching
+        // against underscore-joined tags (e.g., "memory consolidation" → "memory_consolidation")
+        let query_compounds: Vec<String> = query_terms
+            .windows(2)
+            .map(|w| format!("{}_{}", w[0], w[1]))
+            .collect();
 
-        let content_overlap = tags
+        let tag_overlap: f32 = tags
+            .iter()
+            .map(|tag| {
+                let tag_lower = tag.to_lowercase();
+
+                // Direct containment: query term is in the tag
+                let direct = query_terms
+                    .iter()
+                    .any(|term| tag_lower.contains(term));
+
+                // Compound match: tag contains underscore and matches a query compound
+                let compound = tag.contains('_') && query_compounds.iter().any(|c| c == &tag_lower);
+
+                // Component match: tag is a compound and one of its components matches a query term
+                let component = if tag.contains('_') {
+                    tag.split('_').any(|part| {
+                        part.len() > 2 && query_terms.iter().any(|term| *term == part)
+                    })
+                } else {
+                    false
+                };
+
+                if direct || compound || component {
+                    // Compound matches are worth more — they indicate structural similarity
+                    let weight = if compound { 1.5 } else if component { 1.2 } else { 1.0 };
+                    weight
+                } else {
+                    0.0
+                }
+            })
+            .sum();
+
+        let content_overlap: f32 = tags
             .iter()
             .filter(|tag| {
                 let tag_lower = tag.to_lowercase();

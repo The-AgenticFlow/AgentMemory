@@ -16,6 +16,7 @@ pub mod plasticity;
 pub mod retrieval;
 pub mod scoring;
 pub mod stc;
+pub mod tags;
 pub mod types;
 
 pub use config::{

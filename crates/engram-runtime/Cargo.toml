@@ -10,6 +10,7 @@ chrono.workspace = true
 engram-core = { path = "../engram-core" }
 engram-qwen = { path = "../engram-qwen" }
 engram-store = { path = "../engram-store" }
+lazy_static.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

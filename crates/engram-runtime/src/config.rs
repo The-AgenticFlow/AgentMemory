@@ -78,6 +78,9 @@ pub struct BufferConfig {
     pub valence_contribution: f32,
     #[serde(default = "default_threshold_sensitivity")]
     pub threshold_sensitivity: f32,
+    /// Maximum number of heuristic tags to extract per episode.
+    #[serde(default = "default_max_tags")]
+    pub max_tags: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -149,6 +152,9 @@ pub struct ConsolidationConfig {
     pub archive_cleanup_days: i64,
     #[serde(default = "default_pattern_decay_enabled")]
     pub pattern_decay_enabled: bool,
+    /// Maximum number of LLM-extracted concepts to add during tag refinement.
+    #[serde(default = "default_max_concepts")]
+    pub max_concepts: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -297,6 +303,7 @@ impl Default for RuntimeConfig {
                 surprise_contribution: 0.08,
                 valence_contribution: 0.03,
                 threshold_sensitivity: 0.1,
+                max_tags: 12,
             },
             pattern: PatternConfig {
                 completion_threshold: 0.74,
@@ -329,6 +336,7 @@ impl Default for RuntimeConfig {
                 working_memory_min_strength: 0.1,
                 archive_cleanup_days: 90,
                 pattern_decay_enabled: true,
+                max_concepts: 4,
             },
             adaptive: AdaptiveConfig {
                 completion_bias_min: -0.15,
@@ -584,6 +592,10 @@ fn default_threshold_sensitivity() -> f32 {
     0.1
 }
 
+fn default_max_tags() -> usize {
+    12
+}
+
 fn default_separation_search_candidates() -> usize {
     3
 }
@@ -646,6 +658,10 @@ fn default_archive_cleanup_days() -> i64 {
 
 fn default_pattern_decay_enabled() -> bool {
     true
+}
+
+fn default_max_concepts() -> usize {
+    4
 }
 
 #[cfg(test)]

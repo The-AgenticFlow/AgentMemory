@@ -5,10 +5,8 @@
 
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
-use engram_qwen::{
-    DashScopeClient,
-    chat::{ChatMessage, ChatRequest},
-};
+use engram_qwen::chat::{ChatMessage, ChatRequest};
+use engram_qwen::DashScopeClient;
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
 
@@ -16,6 +14,7 @@ use crate::config::ConsolidationConfig;
 use crate::embeddings::{cosine_similarity, embed_text};
 use crate::plasticity::PlasticityProfile;
 use crate::stc::SynapticTaggingCapture;
+use crate::tags::refine_tags_with_llm;
 
 /// Consolidation parameters and cross-cutting replay controls.
 #[derive(Debug, Clone)]
@@ -40,6 +39,8 @@ pub struct NightlyConsolidationNode {
     pub archive_cleanup_days: i64,
     /// Whether buffered-pattern decay should run during consolidation.
     pub pattern_decay_enabled: bool,
+    /// Maximum number of LLM-extracted concepts to add during tag refinement.
+    pub max_concepts: usize,
     pub plasticity: PlasticityProfile,
     pub stc: SynapticTaggingCapture,
 }
@@ -57,6 +58,7 @@ impl Default for NightlyConsolidationNode {
             working_memory_min_strength: 0.1,
             archive_cleanup_days: 90,
             pattern_decay_enabled: true,
+            max_concepts: 4,
             plasticity: PlasticityProfile::default(),
             stc: SynapticTaggingCapture::default(),
         }
@@ -76,12 +78,13 @@ impl NightlyConsolidationNode {
             working_memory_min_strength: config.working_memory_min_strength,
             archive_cleanup_days: config.archive_cleanup_days,
             pattern_decay_enabled: config.pattern_decay_enabled,
+            max_concepts: config.max_concepts,
             plasticity: self.plasticity.clone(),
             stc: self.stc,
         }
     }
 
-    /// Runs decay, cleanup, and schema compression.
+    /// Runs decay, tag refinement, cleanup, and schema compression.
     pub async fn run(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -89,6 +92,9 @@ impl NightlyConsolidationNode {
         qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
         self.decay_engrams(qdrant, postgres).await?;
+        if let Some(client) = qwen {
+            self.refine_engram_tags(qdrant, postgres, client).await?;
+        }
         let (evicted_patterns, expired_wm, cleaned_engrams) =
             self.cleanup(qdrant, postgres).await?;
         if evicted_patterns > 0 || expired_wm > 0 || cleaned_engrams > 0 {
@@ -219,6 +225,54 @@ impl NightlyConsolidationNode {
         Ok((evicted_patterns, expired_wm, cleaned_engrams))
     }
 
+    /// Refines engram tags using LLM-based concept extraction.
+    ///
+    /// This is the second-phase tag enrichment: during consolidation the
+    /// LLM can extract higher-level semantic concepts from the episodic
+    /// content that the fast heuristic extractor would miss (domain terms,
+    /// abstract relationships, cross-cutting concerns).
+    async fn refine_engram_tags(
+        &self,
+        qdrant: &QdrantMemoryStore,
+        postgres: &PostgresMemoryStore,
+        qwen: &DashScopeClient,
+    ) -> Result<()> {
+        let engrams = qdrant.list_engrams().await?;
+        let mut refined_count = 0usize;
+
+        for engram in &engrams {
+            if engram.episodic_content_ref.is_none() {
+                continue;
+            }
+
+            match refine_tags_with_llm(engram, qwen, self.max_concepts).await {
+                Ok(refined_tags) => {
+                    if refined_tags.len() > engram.tags.len() {
+                        let mut updated = engram.clone();
+                        updated.tags = refined_tags;
+                        qdrant.upsert_engram(&updated).await?;
+                        postgres.save_engram(&updated).await?;
+                        refined_count += 1;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "LLM tag refinement failed for engram {}: {error}",
+                        engram.id
+                    );
+                }
+            }
+        }
+
+        if refined_count > 0 {
+            tracing::info!(
+                "consolidation refined tags for {refined_count} engrams"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Compresses similar engrams into schema-level meta-engrams.
     async fn compress_schemas(
         &self,
@@ -295,9 +349,17 @@ fn engram_mode(engram: &EngramEntry) -> engram_core::SessionMode {
     }
 }
 
-/// Returns true when two engrams share at least one tag.
+/// Returns true when two engrams share enough tags to warrant clustering.
+///
+/// Uses a tag overlap ratio: at least half of the smaller tag set must
+/// overlap, with a minimum of 1 shared tag for short tag lists.
 fn shared_tag(left: &engram_core::EngramEntry, right: &engram_core::EngramEntry) -> bool {
-    left.tags.iter().any(|tag| right.tags.contains(tag))
+    if left.tags.is_empty() || right.tags.is_empty() {
+        return false;
+    }
+    let smaller_len = left.tags.len().min(right.tags.len());
+    let shared = left.tags.iter().filter(|t| right.tags.contains(t)).count();
+    shared >= 1 && shared * 2 >= smaller_len
 }
 
 /// Computes the tag intersection across a cluster of engrams.

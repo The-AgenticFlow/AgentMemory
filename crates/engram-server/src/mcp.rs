@@ -221,10 +221,15 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
         }
         "memory_recall" => {
             let session_id = uuid_arg(&args, "session_id")?;
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| (-32602, "memory_recall requires a non-empty 'query' parameter".to_string()))?;
             let handle = load_handle(state, session_id).await?;
             let retrieval: RetrievalOutcome = state
                 .system
-                .retrieve(&handle, string_arg(&args, "query", ""))
+                .retrieve(&handle, query)
                 .await
                 .map_err(internal)?;
             state.sessions.write().await.insert(session_id, handle);
@@ -442,7 +447,7 @@ fn tools() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": {
                 "session_id": { "type": "string", "description": "UUID of the active session returned by memory_open_session" },
                 "query": { "type": "string", "description": "The memory query or question to answer from stored episodes" }
-            }, "required": ["session_id"] }
+            }, "required": ["session_id", "query"] }
         }),
         json!({
             "name": "memory_list_sessions",

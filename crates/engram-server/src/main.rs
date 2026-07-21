@@ -1,13 +1,13 @@
 use std::net::SocketAddr;
 
-use engram_qwen::{DashScopeClient, DashScopeConfig};
+use engram_qwen::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
 use engram_server::{AppState, build_app, mcp};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Load .env file if present so ENGRAM_DASHSCOPE_API_KEY is available.
+    // Load .env file if present so LLM_API_KEY and LLM_ENDPOINT are available.
     // This is a no-op if the file is missing or cannot be read.
     let _ = dotenvy::dotenv();
 
@@ -41,24 +41,32 @@ fn init_tracing() {
 
 async fn app_state_from_env() -> anyhow::Result<AppState> {
     let mut state = AppState::default();
-    let require_qwen = std::env::var("ENGRAM_REQUIRE_QWEN")
+    let require_llm = std::env::var("ENGRAM_REQUIRE_LLM")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
-    match std::env::var("ENGRAM_DASHSCOPE_API_KEY") {
-        Ok(api_key) => {
-            let client = DashScopeClient::new(DashScopeConfig::new(api_key)?);
-            state.system = state.system.with_qwen(client);
-            println!("[engram-server] Qwen client connected (DashScope).");
+    if let Ok(endpoint) = std::env::var("LLM_ENDPOINT") {
+        let config = LlmConfig::from_env()?;
+        let client = LlmClient::new(config);
+        state.system = state.system.with_llm(client);
+        println!(
+            "[engram-server] LLM client connected: {}",
+            endpoint
+        );
+    } else if let Ok(api_key) = std::env::var("ENGRAM_DASHSCOPE_API_KEY") {
+        let client = DashScopeClient::new(DashScopeConfig::new(api_key)?);
+        state.system = state.system.with_qwen(client);
+        println!("[engram-server] Qwen client connected (DashScope).");
+    } else {
+        let msg = "[engram-server] LLM client NOT connected: LLM_ENDPOINT or ENGRAM_DASHSCOPE_API_KEY is missing. Chat will use local fallback replies.";
+        if require_llm {
+            anyhow::bail!(
+                "{} Set LLM_ENDPOINT/LLM_API_KEY or ENGRAM_DASHSCOPE_API_KEY, or unset ENGRAM_REQUIRE_LLM.",
+                msg
+            );
         }
-        Err(_) => {
-            let msg = "[engram-server] Qwen client NOT connected: ENGRAM_DASHSCOPE_API_KEY is missing. Chat will use local fallback replies.";
-            if require_qwen {
-                anyhow::bail!("{} Set it or unset ENGRAM_REQUIRE_QWEN.", msg);
-            }
-            println!("{}", msg);
-        }
+        println!("{}", msg);
     }
 
     // Retry initialization with exponential backoff so the server survives

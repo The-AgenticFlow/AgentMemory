@@ -1,0 +1,230 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, master, release/*]
+  pull_request:
+    branches: [main, master]
+    types: [closed]
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_target: ${{ steps.check.outputs.deploy }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" || "${{ github.ref }}" == "refs/heads/release/"*) ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.action }}" == "closed" && "${{ github.event.pull_request.merged }}" == "true" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+          fi
+          echo "Branch: ${{ github.ref }}"
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [validate-environment]
+    if: needs.validate-environment.outputs.deploy_target == 'true'
+    permissions:
+     _contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,prefix=
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            RUST_LOG=info
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tags: ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-to-server:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, validate-environment]
+    if: needs.validate-environment.outputs.deploy_target == 'true'
+    environment: production
+    steps:
+      - name: Validate required secrets
+        run: |
+          MISSING=""
+          [[ -z "${{ secrets.DEPLOY_HOST }}" ]] && MISSING="${MISSING} DEPLOY_HOST"
+          [[ -z "${{ secrets.DEPLOY_USER }}" ]] && MISSING="${MISSING} DEPLOY_USER"
+          [[ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]] && MISSING="${MISSING} DEPLOY_SSH_KEY"
+          if [[ -n "$MISSING" ]]; then
+            echo "ERROR: Missing required secrets:${MISSING}"
+            echo "Please configure these in GitHub repository settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          echo "All required secrets are configured"
+
+      - name: Setup SSH known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Add SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Create deployment script
+        run: |
+          cat > deploy.sh << 'DEPLOY_SCRIPT'
+          #!/bin/bash
+          set -e
+
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/opt/engram' }}"
+          SSH_HOST="${{ secrets.DEPLOY_HOST }}"
+          SSH_USER="${{ secrets.DEPLOY_USER }}"
+
+          echo "=== Deployment Configuration ==="
+          echo "Image: $IMAGE"
+          echo "Deploy directory: $DEPLOY_DIR"
+          echo "SSH Host: $SSH_HOST"
+
+          # Read environment variables from secrets
+          cat > /tmp/engram.env << 'ENVFILE'
+          # LLM Configuration
+          LLM_ENDPOINT=$LLM_ENDPOINT
+          LLM_API_KEY=$LLM_API_KEY
+          LLM_MODEL=$LLM_MODEL
+          LLM_CHAT_PATH=$LLM_CHAT_PATH
+          LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH
+          LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT
+
+          # DashScope (legacy)
+          ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY
+
+          # Server Configuration
+          ENGRAM_SERVER_ADDR=0.0.0.0:3001
+          ENGRAM_DATA_DIR=/data
+          ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM
+
+          # Neo4j Configuration
+          ENGRAM_NEO4J_URI=$ENGRAM_NEO4J_URI
+          ENGRAM_NEO4J_USER=$ENGRAM_NEO4J_USER
+          ENGRAM_NEO4J_PASSWORD=$ENGRAM_NEO4J_PASSWORD
+          ENGRAM_NEO4J_DATABASE=$ENGRAM_NEO4J_DATABASE
+
+          # MCP Configuration
+          ENGRAM_MCP_HTTP_ENABLED=true
+          ENGRAM_MCP_STDIO_ENABLED=true
+
+          # Logging
+          RUST_LOG=info
+          ENVFILE
+
+          echo "=== Stopping existing container ==="
+          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose down --remove-orphans 2>/dev/null || true"
+
+          echo "=== Creating backup ==="
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"
+
+          echo "=== Updating deployment files ==="
+          scp -r . $SSH_USER@$SSH_HOST:$DEPLOY_DIR/
+          scp /tmp/engram.env $SSH_USER@$SSH_HOST:$DEPLOY_DIR/.env
+
+          echo "=== Pulling image ==="
+          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker pull $IMAGE"
+
+          echo "=== Updating image tag ==="
+          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker tag $IMAGE engram-agent:latest"
+
+          echo "=== Starting services ==="
+          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans"
+
+          echo "=== Checking health ==="
+          sleep 10
+          ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || echo 'Health check failed'"
+
+          echo "=== Cleanup ==="
+          ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
+
+          echo "=== Deployment complete ==="
+          DEPLOY_SCRIPT
+          chmod +x deploy.sh
+
+      - name: Deploy to server
+        run: |
+          export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
+          export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'
+          export LLM_MODEL='${{ secrets.LLM_MODEL }}'
+          export LLM_CHAT_PATH='${{ secrets.LLM_CHAT_PATH }}'
+          export LLM_EMBEDDINGS_PATH='${{ secrets.LLM_EMBEDDINGS_PATH }}'
+          export LLM_RERANK_ENDPOINT='${{ secrets.LLM_RERANK_ENDPOINT }}'
+          export ENGRAM_DASHSCOPE_API_KEY='${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}'
+          export ENGRAM_REQUIRE_LLM='${{ secrets.ENGRAM_REQUIRE_LLM }}'
+          export ENGRAM_NEO4J_URI='${{ secrets.ENGRAM_NEO4J_URI }}'
+          export ENGRAM_NEO4J_USER='${{ secrets.ENGRAM_NEO4J_USER }}'
+          export ENGRAM_NEO4J_PASSWORD='${{ secrets.ENGRAM_NEO4J_PASSWORD }}'
+          export ENGRAM_NEO4J_DATABASE='${{ secrets.ENGRAM_NEO4J_DATABASE }}'
+          
+          ./deploy.sh
+
+  notify-deployment:
+    runs-on: ubuntu-latest
+    needs: [deploy-to-server]
+    if: always() && needs.deploy-to-server.result != 'skipped'
+    steps:
+      - name: Create notification summary
+        run: |
+          echo "## Deployment Notification" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.deploy-to-server.result }}" == "success" ]]; then
+            echo "✅ Deployment **succeeded**" >> $GITHUB_STEP_SUMMARY
+            echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Deployed by: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Deployment **failed**" >> $GITHUB_STEP_SUMMARY
+            echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Please check deployment logs" >> $GITHUB_STEP_SUMMARY
+          fi

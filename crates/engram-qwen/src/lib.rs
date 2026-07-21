@@ -5,4 +5,4 @@ pub mod rerank;
 pub mod structured;
 pub mod thinking;
 
-pub use client::{DashScopeClient, DashScopeConfig};
+pub use client::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};

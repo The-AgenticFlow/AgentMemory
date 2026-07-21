@@ -1,0 +1,30 @@
+services:
+  engram:
+    image: ghcr.io/${{ github.repository }}:${{ github.sha }}
+    env_file:
+      - .env
+    environment:
+      ENGRAM_SERVER_ADDR: 0.0.0.0:3001
+      ENGRAM_DATA_DIR: /data
+      ENGRAM_NEO4J_URI: ${ENGRAM_NEO4J_URI}
+      ENGRAM_NEO4J_USER: ${ENGRAM_NEO4J_USER}
+      ENGRAM_NEO4J_PASSWORD: ${ENGRAM_NEO4J_PASSWORD}
+      ENGRAM_NEO4J_DATABASE: ${ENGRAM_NEO4J_DATABASE}
+      ENGRAM_MCP_HTTP_ENABLED: "true"
+      ENGRAM_MCP_STDIO_ENABLED: "true"
+      LLM_ENDPOINT: ${LLM_ENDPOINT}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_CHAT_PATH: ${LLM_CHAT_PATH}
+      LLM_EMBEDDINGS_PATH: ${LLM_EMBEDDINGS_PATH}
+      LLM_RERANK_ENDPOINT: ${LLM_RERANK_ENDPOINT}
+      ENGRAM_DASHSCOPE_API_KEY: ${ENGRAM_DASHSCOPE_API_KEY}
+      ENGRAM_REQUIRE_LLM: ${ENGRAM_REQUIRE_LLM}
+      RUST_LOG: info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

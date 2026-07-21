@@ -100,6 +100,7 @@ pub struct HealthResponse {
     pub status: &'static str,
     pub sessions: usize,
     pub qwen_connected: bool,
+    pub llm_connected: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,6 +249,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         status: "ok",
         sessions,
         qwen_connected: state.system.qwen.is_some(),
+        llm_connected: state.system.llm.is_some(),
     })
 }
 
@@ -690,33 +692,49 @@ async fn session_view(state: &AppState, session_id: Uuid) -> ApiResult<SessionVi
     Ok(session_view_from_handle(&handle))
 }
 
+fn get_llm_model() -> String {
+    std::env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-plus".to_string())
+}
+
 async fn generate_reply(
     state: &AppState,
     handle: &SessionHandle,
     message: &str,
     retrieval: Option<&RetrievalOutcome>,
 ) -> String {
-    if let Some(qwen) = &state.system.qwen {
-        let prompt = match retrieval {
-            Some(retrieval) => build_prompt_with_retrieval(handle, message, retrieval),
-            None => build_prompt_plain(handle, message),
-        };
-        match qwen
-            .chat(&ChatRequest::new(
-                "qwen-plus",
-                vec![
-                    ChatMessage {
-                        role: "system".to_string(),
-                        content: "You are EngramAgent, a persistent-memory assistant. When retrieved memories are provided below, ground your answer ONLY in the numbered [1], [2]... facts shown. If the memories do not contain the answer, say so clearly and note the gap. Never invent facts or infer names, dates, or details that are not in the retrieved text.".to_string(),
-                    },
-                    ChatMessage {
-                        role: "user".to_string(),
-                        content: prompt,
-                    },
-                ],
-            ))
-            .await
-        {
+    let prompt = match retrieval {
+        Some(retrieval) => build_prompt_with_retrieval(handle, message, retrieval),
+        None => build_prompt_plain(handle, message),
+    };
+
+    let system_prompt = "You are EngramAgent, a persistent-memory assistant. When retrieved memories are provided below, ground your answer ONLY in the numbered [1], [2]... facts shown. If the memories do not contain the answer, say so clearly and note the gap. Never invent facts or infer names, dates, or details that are not in the retrieved text.";
+
+    let messages = vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+        },
+    ];
+
+    if let Some(llm) = &state.system.llm {
+        let model = get_llm_model();
+        match llm.chat(&ChatRequest::new(model, messages.clone())).await {
+            Ok(response) => {
+                if let Some(choice) = response.choices.first() {
+                    return choice.message.content.clone();
+                }
+            }
+            Err(e) => {
+                tracing::warn!("LLM chat call failed: {e}");
+            }
+        }
+    } else if let Some(qwen) = &state.system.qwen {
+        let model = get_llm_model();
+        match qwen.chat(&ChatRequest::new(model, messages)).await {
             Ok(response) => {
                 if let Some(choice) = response.choices.first() {
                     return choice.message.content.clone();

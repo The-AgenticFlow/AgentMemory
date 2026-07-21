@@ -1,7 +1,4 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
-
-use crate::client::DashScopeClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RerankRequest {
@@ -19,15 +16,4 @@ pub struct RerankResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RerankResponse {
     pub results: Vec<RerankResult>,
-}
-
-pub async fn build_rerank_request(
-    client: &DashScopeClient,
-    request: &RerankRequest,
-) -> Result<reqwest::RequestBuilder> {
-    Ok(client
-        .http()
-        .post(client.rerank_url("rerank")?)
-        .bearer_auth(&client.config().api_key)
-        .json(request))
 }

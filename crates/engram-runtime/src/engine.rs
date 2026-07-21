@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use engram_core::{Episode, MetaEngram, Session, SessionMode, ThalamusScores, WorkingContext};
-use engram_qwen::DashScopeClient;
+use engram_qwen::{DashScopeClient, LlmClient};
 use engram_store::{
     ConfigAuditRecord, IngestionRecord, Neo4jHealth, Neo4jMemoryStore, OssMemoryStore,
     PostgresMemoryStore, QdrantMemoryStore,
@@ -39,6 +39,8 @@ pub struct MemorySystem {
     pub oss: OssMemoryStore,
     /// Optional Qwen client for remote reasoning and embeddings.
     pub qwen: Option<DashScopeClient>,
+    /// Optional generic OpenAI-compatible LLM client.
+    pub llm: Option<LlmClient>,
     thalamus: ThalamusFilterNode,
     buffer: BufferIngestNode,
     pattern: PatternSepCompNode,
@@ -122,6 +124,7 @@ impl MemorySystem {
             postgres: PostgresMemoryStore::default(),
             oss: OssMemoryStore,
             qwen: None,
+            llm: None,
             thalamus: ThalamusFilterNode::default(),
             buffer: BufferIngestNode::default(),
             pattern: PatternSepCompNode::default(),
@@ -137,6 +140,12 @@ impl MemorySystem {
     /// Installs a Qwen client for remote API calls.
     pub fn with_qwen(mut self, qwen: DashScopeClient) -> Self {
         self.qwen = Some(qwen);
+        self
+    }
+
+    /// Installs a generic OpenAI-compatible LLM client for remote API calls.
+    pub fn with_llm(mut self, llm: LlmClient) -> Self {
+        self.llm = Some(llm);
         self
     }
 

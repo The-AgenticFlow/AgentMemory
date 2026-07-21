@@ -1,7 +1,4 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
-
-use crate::client::DashScopeClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
@@ -15,6 +12,8 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
 }
 
 impl ChatRequest {
@@ -23,7 +22,13 @@ impl ChatRequest {
             model: model.into(),
             messages,
             temperature: None,
+            stream: None,
         }
+    }
+
+    pub fn with_stream(mut self, stream: bool) -> Self {
+        self.stream = Some(stream);
+        self
     }
 }
 
@@ -36,15 +41,4 @@ pub struct ChatChoice {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatResponse {
     pub choices: Vec<ChatChoice>,
-}
-
-pub async fn build_chat_request(
-    client: &DashScopeClient,
-    request: &ChatRequest,
-) -> Result<reqwest::RequestBuilder> {
-    Ok(client
-        .http()
-        .post(client.compatible_mode_url("chat/completions")?)
-        .bearer_auth(&client.config().api_key)
-        .json(request))
 }

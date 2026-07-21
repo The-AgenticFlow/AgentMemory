@@ -1,34 +1,206 @@
-/// Configuration for the Qwen/DashScope API surfaces used by the agent.
-///
-/// Needs:
-/// - One base URL for compatible-mode chat and embeddings.
-/// - A separate base URL for reranking.
-/// - A single API key that can be reused across requests.
-///
-/// Use cases:
-/// - Build requests for conversation, embeddings, and rerank calls.
-/// - Keep endpoint differences explicit so the calling code does not mix them.
-///
-/// System interactions:
-/// - Used by the agent reasoning layer.
-/// - Feeds embeddings into retrieval and reranking into candidate selection.
-/// - Keeps API-specific concerns out of the memory model.
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
+use bytes::Bytes;
+use serde::de::DeserializeOwned;
 
-/// All runtime configuration needed to talk to DashScope.
+use crate::chat::{ChatRequest, ChatResponse};
+use crate::embeddings::{EmbeddingRequest, EmbeddingResponse};
+use crate::rerank::{RerankRequest, RerankResponse};
+
+/// Configuration for OpenAI-compatible LLM API endpoints.
+///
+/// Supports any OpenAI-compatible endpoint (Qwen, GPT-4, Llama via local servers, etc.)
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    pub api_key: String,
+    pub base_url: Url,
+    pub chat_path: String,
+    pub embeddings_path: String,
+    pub rerank_base_url: Option<Url>,
+}
+
+impl LlmConfig {
+    pub fn new(api_key: impl Into<String>) -> Result<Self> {
+        Self::with_endpoint(api_key, "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/")
+    }
+
+    pub fn with_endpoint(api_key: impl Into<String>, base_url: &str) -> Result<Self> {
+        Ok(Self {
+            api_key: api_key.into(),
+            base_url: Url::parse(base_url).context("failed to parse base URL")?,
+            chat_path: "chat/completions".to_string(),
+            embeddings_path: "embeddings".to_string(),
+            rerank_base_url: None,
+        })
+    }
+
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("LLM_API_KEY").unwrap_or_default();
+        let base_url = std::env::var("LLM_ENDPOINT").unwrap_or_else(|_| {
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/".to_string()
+        });
+        let chat_path = std::env::var("LLM_CHAT_PATH").unwrap_or_else(|_| "chat/completions".to_string());
+        let embeddings_path =
+            std::env::var("LLM_EMBEDDINGS_PATH").unwrap_or_else(|_| "embeddings".to_string());
+
+        let rerank_base_url = std::env::var("LLM_RERANK_ENDPOINT")
+            .ok()
+            .map(|url| Url::parse(&url).context("failed to parse rerank base URL"))
+            .transpose()?;
+
+        Ok(Self {
+            api_key,
+            base_url: Url::parse(&base_url).context("failed to parse base URL")?,
+            chat_path,
+            embeddings_path,
+            rerank_base_url,
+        })
+    }
+}
+
+/// Thin HTTP wrapper around OpenAI-compatible LLM endpoints.
+#[derive(Debug, Clone)]
+pub struct LlmClient {
+    http: Client,
+    config: LlmConfig,
+}
+
+impl LlmClient {
+    pub fn new(config: LlmConfig) -> Self {
+        Self {
+            http: Client::new(),
+            config,
+        }
+    }
+
+    pub fn http(&self) -> &Client {
+        &self.http
+    }
+
+    pub fn config(&self) -> &LlmConfig {
+        &self.config
+    }
+
+    pub fn chat_url(&self) -> Result<Url> {
+        self.config
+            .base_url
+            .join(&self.config.chat_path)
+            .context("failed to build chat URL")
+    }
+
+    pub fn embeddings_url(&self) -> Result<Url> {
+        self.config
+            .base_url
+            .join(&self.config.embeddings_path)
+            .context("failed to build embeddings URL")
+    }
+
+    pub fn rerank_url(&self, path: &str) -> Result<Url> {
+        let base = self
+            .config
+            .rerank_base_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("rerank endpoint not configured"))?;
+        base.join(path.trim_start_matches('/'))
+            .context("failed to build rerank URL")
+    }
+
+    pub async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
+        let request = self
+            .http()
+            .post(self.chat_url()?)
+            .bearer_auth(&self.config.api_key)
+            .json(request);
+        let response = request.send().await?;
+        Ok(response.error_for_status()?.json::<ChatResponse>().await?)
+    }
+
+    pub async fn stream_chat(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<Bytes> {
+        let request = ChatRequest {
+            stream: Some(true),
+            ..request.clone()
+        };
+        let response = self
+            .http()
+            .post(self.chat_url()?)
+            .bearer_auth(&self.config.api_key)
+            .json(&request)
+            .send()
+            .await?;
+        Ok(response.error_for_status()?.bytes().await?)
+    }
+
+    pub async fn embeddings(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
+        let response = self
+            .http()
+            .post(self.embeddings_url()?)
+            .bearer_auth(&self.config.api_key)
+            .json(request)
+            .send()
+            .await?;
+        Ok(response
+            .error_for_status()?
+            .json::<EmbeddingResponse>()
+            .await?)
+    }
+
+    pub async fn rerank(&self, request: &RerankRequest) -> Result<RerankResponse> {
+        let response = self
+            .http()
+            .post(self.rerank_url("")?)
+            .bearer_auth(&self.config.api_key)
+            .json(request)
+            .send()
+            .await?;
+        Ok(response
+            .error_for_status()?
+            .json::<RerankResponse>()
+            .await?)
+    }
+
+    pub async fn structured<T: DeserializeOwned>(&self, request: &ChatRequest) -> Result<T> {
+        let response = self.chat(request).await?;
+        let content = response
+            .choices
+            .first()
+            .map(|choice| choice.message.content.as_str())
+            .unwrap_or("{}");
+        Ok(serde_json::from_str(content)?)
+    }
+
+    pub async fn thinking(
+        &self,
+        prompt: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<String> {
+        let request = ChatRequest::new(
+            model,
+            vec![crate::chat::ChatMessage {
+                role: "user".to_string(),
+                content: prompt.into(),
+            }],
+        );
+        let response = self.chat(&request).await?;
+        Ok(response
+            .choices
+            .first()
+            .map(|choice| choice.message.content.clone())
+            .unwrap_or_default())
+    }
+}
+
+/// Configuration for DashScope API.
 #[derive(Debug, Clone)]
 pub struct DashScopeConfig {
-    /// API key used for all DashScope requests.
     pub api_key: String,
-    /// OpenAI-compatible endpoint for chat and embeddings.
     pub base_url: Url,
-    /// Native rerank endpoint base.
     pub rerank_base_url: Url,
 }
 
 impl DashScopeConfig {
-    /// Builds a config with the default production endpoints.
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         Ok(Self {
             api_key: api_key.into(),
@@ -40,12 +212,6 @@ impl DashScopeConfig {
     }
 }
 
-use serde::de::DeserializeOwned;
-
-use crate::chat::{ChatRequest, ChatResponse, build_chat_request};
-use crate::embeddings::{EmbeddingRequest, EmbeddingResponse, build_embedding_request};
-use crate::rerank::{RerankRequest, RerankResponse, build_rerank_request};
-
 /// Thin HTTP wrapper around DashScope endpoints.
 #[derive(Debug, Clone)]
 pub struct DashScopeClient {
@@ -54,7 +220,6 @@ pub struct DashScopeClient {
 }
 
 impl DashScopeClient {
-    /// Creates a client from a validated configuration.
     pub fn new(config: DashScopeConfig) -> Self {
         Self {
             http: Client::new(),
@@ -62,25 +227,21 @@ impl DashScopeClient {
         }
     }
 
-    /// Returns the underlying HTTP client.
     pub fn http(&self) -> &Client {
         &self.http
     }
 
-    /// Returns the current configuration snapshot.
     pub fn config(&self) -> &DashScopeConfig {
         &self.config
     }
 
-    /// Builds a URL under the compatible-mode base path.
-    pub fn compatible_mode_url(&self, path: &str) -> Result<Url> {
+    pub fn chat_url(&self, path: &str) -> Result<Url> {
         self.config
             .base_url
             .join(path.trim_start_matches('/'))
-            .context("failed to build compatible-mode URL")
+            .context("failed to build chat URL")
     }
 
-    /// Builds a URL under the rerank base path.
     pub fn rerank_url(&self, path: &str) -> Result<Url> {
         self.config
             .rerank_base_url
@@ -88,31 +249,46 @@ impl DashScopeClient {
             .context("failed to build rerank URL")
     }
 
-    /// Sends a chat completion request.
     pub async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let response = build_chat_request(self, request).await?.send().await?;
+        let response = self
+            .http()
+            .post(self.chat_url("chat/completions")?)
+            .bearer_auth(&self.config.api_key)
+            .json(request)
+            .send()
+            .await?;
         Ok(response.error_for_status()?.json::<ChatResponse>().await?)
     }
 
-    /// Sends an embeddings request.
     pub async fn embeddings(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        let response = build_embedding_request(self, request).await?.send().await?;
+        let response = self
+            .http()
+            .post(self.chat_url("embeddings")?)
+            .bearer_auth(&self.config.api_key)
+            .json(request)
+            .send()
+            .await?;
         Ok(response
             .error_for_status()?
             .json::<EmbeddingResponse>()
             .await?)
     }
 
-    /// Sends a rerank request.
+    #[allow(dead_code)]
     pub async fn rerank(&self, request: &RerankRequest) -> Result<RerankResponse> {
-        let response = build_rerank_request(self, request).await?.send().await?;
+        let response = self
+            .http()
+            .post(self.rerank_url("")?)
+            .bearer_auth(&self.config.api_key)
+            .json(request)
+            .send()
+            .await?;
         Ok(response
             .error_for_status()?
             .json::<RerankResponse>()
             .await?)
     }
 
-    /// Runs a structured JSON extraction through chat and parses the result.
     pub async fn structured<T: DeserializeOwned>(&self, request: &ChatRequest) -> Result<T> {
         let response = self.chat(request).await?;
         let content = response
@@ -123,7 +299,6 @@ impl DashScopeClient {
         Ok(serde_json::from_str(content)?)
     }
 
-    /// Sends a think-style prompt through the chat endpoint and returns text.
     pub async fn thinking(
         &self,
         prompt: impl Into<String>,

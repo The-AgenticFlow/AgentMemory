@@ -6,12 +6,10 @@ services:
     environment:
       ENGRAM_SERVER_ADDR: 0.0.0.0:3001
       ENGRAM_DATA_DIR: /data
-      ENGRAM_NEO4J_URI: ${ENGRAM_NEO4J_URI}
-      ENGRAM_NEO4J_USER: ${ENGRAM_NEO4J_USER}
-      ENGRAM_NEO4J_PASSWORD: ${ENGRAM_NEO4J_PASSWORD}
-      ENGRAM_NEO4J_DATABASE: ${ENGRAM_NEO4J_DATABASE}
+      # Neo4j config comes from local .env file
       ENGRAM_MCP_HTTP_ENABLED: "true"
       ENGRAM_MCP_STDIO_ENABLED: "true"
+      # LLM config (updated by deployment)
       LLM_ENDPOINT: ${LLM_ENDPOINT}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}

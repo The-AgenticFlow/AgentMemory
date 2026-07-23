@@ -225,7 +225,12 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
                 .get("query")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| (-32602, "memory_recall requires a non-empty 'query' parameter".to_string()))?;
+                .ok_or_else(|| {
+                    (
+                        -32602,
+                        "memory_recall requires a non-empty 'query' parameter".to_string(),
+                    )
+                })?;
             let handle = load_handle(state, session_id).await?;
             let retrieval: RetrievalOutcome = state
                 .system

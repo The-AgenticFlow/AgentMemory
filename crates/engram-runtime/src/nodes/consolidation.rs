@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
-use engram_qwen::chat::{ChatMessage, ChatRequest};
 use engram_qwen::DashScopeClient;
+use engram_qwen::chat::{ChatMessage, ChatRequest};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
 
@@ -265,9 +265,7 @@ impl NightlyConsolidationNode {
         }
 
         if refined_count > 0 {
-            tracing::info!(
-                "consolidation refined tags for {refined_count} engrams"
-            );
+            tracing::info!("consolidation refined tags for {refined_count} engrams");
         }
 
         Ok(())

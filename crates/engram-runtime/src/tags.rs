@@ -14,7 +14,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use engram_core::EngramEntry;
-use engram_qwen::{DashScopeClient, chat::{ChatMessage, ChatRequest}};
+use engram_qwen::{
+    DashScopeClient,
+    chat::{ChatMessage, ChatRequest},
+};
 
 // ---------------------------------------------------------------------------
 // Phase 1: Heuristic tag extraction
@@ -32,74 +35,358 @@ const MIN_COMPOUND_COMPONENT_LEN: usize = 3;
 /// Comprehensive stop-word set covering English function words.
 const STOP_WORDS: &[&str] = &[
     // Articles & determiners
-    "the", "a", "an", "this", "that", "these", "those",
+    "the",
+    "a",
+    "an",
+    "this",
+    "that",
+    "these",
+    "those",
     // Pronouns
-    "i", "me", "my", "myself", "we", "our", "ours", "ourselves",
-    "you", "your", "yours", "yourself", "yourselves",
-    "he", "him", "his", "himself", "she", "her", "hers", "herself",
-    "it", "its", "itself", "they", "them", "their", "theirs", "themselves",
-    "what", "which", "who", "whom", "whose",
+    "i",
+    "me",
+    "my",
+    "myself",
+    "we",
+    "our",
+    "ours",
+    "ourselves",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+    "he",
+    "him",
+    "his",
+    "himself",
+    "she",
+    "her",
+    "hers",
+    "herself",
+    "it",
+    "its",
+    "itself",
+    "they",
+    "them",
+    "their",
+    "theirs",
+    "themselves",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "whose",
     // Prepositions & conjunctions
-    "and", "but", "or", "nor", "for", "so", "yet", "both", "either",
-    "neither", "not", "only", "also", "then", "than",
-    "with", "from", "into", "onto", "upon", "about", "above", "across",
-    "after", "against", "along", "among", "around", "at", "before",
-    "behind", "below", "beneath", "beside", "between", "beyond", "by",
-    "down", "during", "except", "in", "inside", "near", "of", "off",
-    "on", "out", "outside", "over", "past", "since", "through",
-    "throughout", "till", "to", "toward", "under", "underneath", "until",
-    "up", "via", "within", "without",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "for",
+    "so",
+    "yet",
+    "both",
+    "either",
+    "neither",
+    "not",
+    "only",
+    "also",
+    "then",
+    "than",
+    "with",
+    "from",
+    "into",
+    "onto",
+    "upon",
+    "about",
+    "above",
+    "across",
+    "after",
+    "against",
+    "along",
+    "among",
+    "around",
+    "at",
+    "before",
+    "behind",
+    "below",
+    "beneath",
+    "beside",
+    "between",
+    "beyond",
+    "by",
+    "down",
+    "during",
+    "except",
+    "in",
+    "inside",
+    "near",
+    "of",
+    "off",
+    "on",
+    "out",
+    "outside",
+    "over",
+    "past",
+    "since",
+    "through",
+    "throughout",
+    "till",
+    "to",
+    "toward",
+    "under",
+    "underneath",
+    "until",
+    "up",
+    "via",
+    "within",
+    "without",
     // Auxiliary & modal verbs
-    "is", "am", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "having",
-    "do", "does", "did", "doing",
-    "will", "would", "shall", "should", "can", "could", "may", "might",
+    "is",
+    "am",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "having",
+    "do",
+    "does",
+    "did",
+    "doing",
+    "will",
+    "would",
+    "shall",
+    "should",
+    "can",
+    "could",
+    "may",
+    "might",
     "must",
     // Common verbs (low information density in tags)
-    "get", "got", "gotten", "give", "gave", "given",
-    "make", "made", "take", "took", "come", "came",
-    "see", "saw", "know", "knew", "think", "thought",
-    "say", "said", "tell", "told", "ask", "asked",
-    "want", "wanted", "use", "used", "find", "found",
-    "work", "worked", "feel", "felt", "try", "tried",
-    "need", "needed", "become", "became", "leave", "left",
-    "put", "bring", "brought", "let", "begin", "began",
-    "seem", "seemed", "help", "helped", "show", "showed",
-    "play", "played", "run", "ran", "move", "moved",
-    "live", "lived", "believe", "believed",
-    "happen", "happened", "stand", "stood",
-    "lose", "lost", "pay", "paid", "meet", "met",
-    "include", "included", "continue", "continued",
-    "set", "learn", "learned", "change", "changed",
-    "lead", "led", "understand", "understood",
-    "watch", "watched", "follow", "followed",
-    "stop", "stopped", "create", "created",
-    "speak", "spoke", "read", "allow", "allowed",
-    "add", "added", "spend", "spent", "grow", "grew",
-    "open", "opened", "walk", "walked", "win", "won",
-    "offer", "offered", "remember", "remembered",
-    "love", "loved", "consider", "considered",
-    "appear", "appeared", "buy", "bought",
-    "wait", "waited", "serve", "served", "die", "died",
-    "send", "sent", "expect", "expected",
-    "build", "built", "stay", "stayed",
-    "fall", "fell", "cut", "reach", "reached",
-    "kill", "killed", "remain", "remained",
-    "suggest", "suggested", "raise", "raised",
-    "pass", "passed", "sell", "sold",
-    "require", "required", "report", "reported",
-    "decide", "decided", "pull", "pulled",
-    "like", "liked",
+    "get",
+    "got",
+    "gotten",
+    "give",
+    "gave",
+    "given",
+    "make",
+    "made",
+    "take",
+    "took",
+    "come",
+    "came",
+    "see",
+    "saw",
+    "know",
+    "knew",
+    "think",
+    "thought",
+    "say",
+    "said",
+    "tell",
+    "told",
+    "ask",
+    "asked",
+    "want",
+    "wanted",
+    "use",
+    "used",
+    "find",
+    "found",
+    "work",
+    "worked",
+    "feel",
+    "felt",
+    "try",
+    "tried",
+    "need",
+    "needed",
+    "become",
+    "became",
+    "leave",
+    "left",
+    "put",
+    "bring",
+    "brought",
+    "let",
+    "begin",
+    "began",
+    "seem",
+    "seemed",
+    "help",
+    "helped",
+    "show",
+    "showed",
+    "play",
+    "played",
+    "run",
+    "ran",
+    "move",
+    "moved",
+    "live",
+    "lived",
+    "believe",
+    "believed",
+    "happen",
+    "happened",
+    "stand",
+    "stood",
+    "lose",
+    "lost",
+    "pay",
+    "paid",
+    "meet",
+    "met",
+    "include",
+    "included",
+    "continue",
+    "continued",
+    "set",
+    "learn",
+    "learned",
+    "change",
+    "changed",
+    "lead",
+    "led",
+    "understand",
+    "understood",
+    "watch",
+    "watched",
+    "follow",
+    "followed",
+    "stop",
+    "stopped",
+    "create",
+    "created",
+    "speak",
+    "spoke",
+    "read",
+    "allow",
+    "allowed",
+    "add",
+    "added",
+    "spend",
+    "spent",
+    "grow",
+    "grew",
+    "open",
+    "opened",
+    "walk",
+    "walked",
+    "win",
+    "won",
+    "offer",
+    "offered",
+    "remember",
+    "remembered",
+    "love",
+    "loved",
+    "consider",
+    "considered",
+    "appear",
+    "appeared",
+    "buy",
+    "bought",
+    "wait",
+    "waited",
+    "serve",
+    "served",
+    "die",
+    "died",
+    "send",
+    "sent",
+    "expect",
+    "expected",
+    "build",
+    "built",
+    "stay",
+    "stayed",
+    "fall",
+    "fell",
+    "cut",
+    "reach",
+    "reached",
+    "kill",
+    "killed",
+    "remain",
+    "remained",
+    "suggest",
+    "suggested",
+    "raise",
+    "raised",
+    "pass",
+    "passed",
+    "sell",
+    "sold",
+    "require",
+    "required",
+    "report",
+    "reported",
+    "decide",
+    "decided",
+    "pull",
+    "pulled",
+    "like",
+    "liked",
     // Quantifiers & misc
-    "all", "each", "every", "both", "few", "many", "much", "several",
-    "some", "any", "no", "nobody", "nothing", "nowhere",
-    "somebody", "someone", "something", "everywhere",
-    "just", "very", "really", "quite", "enough", "even",
-    "here", "there", "now", "again", "still", "already",
+    "all",
+    "each",
+    "every",
+    "both",
+    "few",
+    "many",
+    "much",
+    "several",
+    "some",
+    "any",
+    "no",
+    "nobody",
+    "nothing",
+    "nowhere",
+    "somebody",
+    "someone",
+    "something",
+    "everywhere",
+    "just",
+    "very",
+    "really",
+    "quite",
+    "enough",
+    "even",
+    "here",
+    "there",
+    "now",
+    "again",
+    "still",
+    "already",
     // Common adjectives/adverbs with low discrimination
-    "good", "bad", "great", "new", "old", "first", "last", "long",
-    "little", "right", "big", "small", "large", "next", "own", "same",
-    "different", "able", "other", "such", "more", "most",
+    "good",
+    "bad",
+    "great",
+    "new",
+    "old",
+    "first",
+    "last",
+    "long",
+    "little",
+    "right",
+    "big",
+    "small",
+    "large",
+    "next",
+    "own",
+    "same",
+    "different",
+    "able",
+    "other",
+    "such",
+    "more",
+    "most",
 ];
 
 lazy_static::lazy_static! {
@@ -154,13 +441,12 @@ fn tokenize(text: &str) -> Vec<String> {
             let mut boundary_indices = Vec::new();
             let chars: Vec<char> = raw.chars().collect();
             for i in 1..chars.len() {
-                if chars[i].is_uppercase() && chars[i - 1].is_lowercase() {
-                    boundary_indices.push(i);
-                } else if chars[i].is_uppercase()
+                let lowercase_to_uppercase = chars[i].is_uppercase() && chars[i - 1].is_lowercase();
+                let uppercase_between_lowercase = chars[i].is_uppercase()
                     && i + 1 < chars.len()
                     && chars[i + 1].is_lowercase()
-                    && chars[i - 1].is_lowercase()
-                {
+                    && chars[i - 1].is_lowercase();
+                if lowercase_to_uppercase || uppercase_between_lowercase {
                     boundary_indices.push(i);
                 }
             }
@@ -203,14 +489,17 @@ fn extract_ngrams(tokens: &[String], max_n: usize) -> Vec<String> {
 
     for n in 2..=max_n {
         for window in content_indices.windows(n) {
-            let has_separator = window.iter().any(|&i| {
-                tokens[i].contains('_') || tokens[i].contains('-')
-            });
+            let has_separator = window
+                .iter()
+                .any(|&i| tokens[i].contains('_') || tokens[i].contains('-'));
             let components: Vec<&str> = window.iter().map(|&i| tokens[i].as_str()).collect();
             let ngram = components.join("_");
 
             // Skip n-grams containing only very short components
-            if components.iter().all(|c| c.len() < MIN_COMPOUND_COMPONENT_LEN) {
+            if components
+                .iter()
+                .all(|c| c.len() < MIN_COMPOUND_COMPONENT_LEN)
+            {
                 continue;
             }
             // Skip n-grams that look like trivial joins
@@ -274,7 +563,7 @@ pub fn extract_tags(action: &str, context: &str, outcome: &str, max_tags: usize)
 
     let mut demoted: HashSet<String> = HashSet::new();
     for compound in &compound_tags {
-        let components: Vec<&str> = compound.split(|c: char| c == '_' || c == '-').collect();
+        let components: Vec<&str> = compound.split(['_', '-']).collect();
         for component in &components {
             if component.len() >= MIN_UNIGRAM_LEN {
                 demoted.insert(component.to_string());
@@ -416,7 +705,8 @@ mod tests {
         assert!(!tags.is_empty());
         // Should include compound bigrams like "database_connection"
         assert!(
-            tags.iter().any(|t| t.contains("database") || t.contains("connection")),
+            tags.iter()
+                .any(|t| t.contains("database") || t.contains("connection")),
             "Expected database/connection-related tags, got: {:?}",
             tags
         );
@@ -484,7 +774,8 @@ mod tests {
             assert!(
                 c < m,
                 "Compound 'memory_consolidation' should rank higher than component 'memory', got positions {} vs {}",
-                c, m
+                c,
+                m
             );
         }
     }
@@ -518,8 +809,8 @@ mod tests {
     #[test]
     fn extract_tags_default_uses_12() {
         let tags = extract_tags_default("test", "test context", "test outcome");
-        // Just verify it doesn't panic and returns something
-        assert!(!tags.is_empty() || true); // May be empty if all words are stop words
+        // Just verify it doesn't panic. Tags may be empty if all words are stop words
+        let _ = tags;
     }
 
     #[test]
@@ -534,7 +825,9 @@ mod tests {
         let ngrams = extract_ngrams(&tokens, 2);
         // Should produce compounds like "database_connection", "connection_error", etc.
         assert!(
-            ngrams.iter().any(|n| n.contains("database") && n.contains("connection")),
+            ngrams
+                .iter()
+                .any(|n| n.contains("database") && n.contains("connection")),
             "Expected database_connection bigram, got: {:?}",
             ngrams
         );
@@ -547,7 +840,8 @@ mod tests {
         assert!(
             compound_score > simple_score,
             "Compound should score higher: {} vs {}",
-            compound_score, simple_score
+            compound_score,
+            simple_score
         );
     }
 }

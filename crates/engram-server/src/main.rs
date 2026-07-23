@@ -50,10 +50,7 @@ async fn app_state_from_env() -> anyhow::Result<AppState> {
         let config = LlmConfig::from_env()?;
         let client = LlmClient::new(config);
         state.system = state.system.with_llm(client);
-        println!(
-            "[engram-server] LLM client connected: {}",
-            endpoint
-        );
+        println!("[engram-server] LLM client connected: {}", endpoint);
     } else if let Ok(api_key) = std::env::var("ENGRAM_DASHSCOPE_API_KEY") {
         let client = DashScopeClient::new(DashScopeConfig::new(api_key)?);
         state.system = state.system.with_qwen(client);

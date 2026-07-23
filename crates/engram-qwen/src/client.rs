@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use reqwest::{Client, Url};
 use bytes::Bytes;
+use reqwest::{Client, Url};
 use serde::de::DeserializeOwned;
 
 use crate::chat::{ChatRequest, ChatResponse};
@@ -21,7 +21,10 @@ pub struct LlmConfig {
 
 impl LlmConfig {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
-        Self::with_endpoint(api_key, "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/")
+        Self::with_endpoint(
+            api_key,
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/",
+        )
     }
 
     pub fn with_endpoint(api_key: impl Into<String>, base_url: &str) -> Result<Self> {
@@ -39,7 +42,8 @@ impl LlmConfig {
         let base_url = std::env::var("LLM_ENDPOINT").unwrap_or_else(|_| {
             "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/".to_string()
         });
-        let chat_path = std::env::var("LLM_CHAT_PATH").unwrap_or_else(|_| "chat/completions".to_string());
+        let chat_path =
+            std::env::var("LLM_CHAT_PATH").unwrap_or_else(|_| "chat/completions".to_string());
         let embeddings_path =
             std::env::var("LLM_EMBEDDINGS_PATH").unwrap_or_else(|_| "embeddings".to_string());
 
@@ -115,10 +119,7 @@ impl LlmClient {
         Ok(response.error_for_status()?.json::<ChatResponse>().await?)
     }
 
-    pub async fn stream_chat(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<Bytes> {
+    pub async fn stream_chat(&self, request: &ChatRequest) -> Result<Bytes> {
         let request = ChatRequest {
             stream: Some(true),
             ..request.clone()

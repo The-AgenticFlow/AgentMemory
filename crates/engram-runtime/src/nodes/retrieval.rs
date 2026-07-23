@@ -302,26 +302,28 @@ impl RetrievalArchitectureNode {
                 let tag_lower = tag.to_lowercase();
 
                 // Direct containment: query term is in the tag
-                let direct = query_terms
-                    .iter()
-                    .any(|term| tag_lower.contains(term));
+                let direct = query_terms.iter().any(|term| tag_lower.contains(term));
 
                 // Compound match: tag contains underscore and matches a query compound
                 let compound = tag.contains('_') && query_compounds.iter().any(|c| c == &tag_lower);
 
                 // Component match: tag is a compound and one of its components matches a query term
                 let component = if tag.contains('_') {
-                    tag.split('_').any(|part| {
-                        part.len() > 2 && query_terms.iter().any(|term| *term == part)
-                    })
+                    tag.split('_')
+                        .any(|part| part.len() > 2 && query_terms.contains(&part))
                 } else {
                     false
                 };
 
                 if direct || compound || component {
                     // Compound matches are worth more — they indicate structural similarity
-                    let weight = if compound { 1.5 } else if component { 1.2 } else { 1.0 };
-                    weight
+                    if compound {
+                        1.5
+                    } else if component {
+                        1.2
+                    } else {
+                        1.0
+                    }
                 } else {
                     0.0
                 }

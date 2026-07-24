@@ -119,73 +119,58 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Create deployment script
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          cat > deploy.sh << 'DEPLOY_SCRIPT'
-          #!/bin/bash
-          set -e
-          
-          IMAGE="__IMAGE__"
-          DEPLOY_DIR="__DEPLOY_DIR__"
-          SSH_HOST="__SSH_HOST__"
-          SSH_USER="__SSH_USER__"
-          
-          echo "=== Deployment Configuration ==="
-          echo "Image: $IMAGE"
-          echo "Deploy directory: $DEPLOY_DIR"
-          echo "SSH Host: $SSH_HOST"
-          
-          cat > /tmp/update_llm.sh << 'UPDATE_SCRIPT'
-          #!/bin/bash
-          ENV_FILE=.env
-          [[ -f $ENV_FILE ]] && cp $ENV_FILE $ENV_FILE.bak
-          if [[ -f $ENV_FILE ]]; then
-            grep -v "^LLM_" $ENV_FILE > $ENV_FILE.tmp && mv $ENV_FILE.tmp $ENV_FILE
-          fi
-          cat >> $ENV_FILE << 'LLM_CONF'
-          
-          LLM_ENDPOINT=$LLM_ENDPOINT
-          LLM_API_KEY=$LLM_API_KEY
-          LLM_MODEL=$LLM_MODEL
-          LLM_CHAT_PATH=$LLM_CHAT_PATH
-          LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH
-          LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT
-          ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY
-          ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM
-          LLM_CONF
-          UPDATE_SCRIPT
-          
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose down --remove-orphans 2>/dev/null || true"
-          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"
-          scp -r . $SSH_USER@$SSH_HOST:$DEPLOY_DIR/
-          scp /tmp/update_llm.sh $SSH_USER@$SSH_HOST:$DEPLOY_DIR/update_llm.sh
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && bash update_llm.sh"
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker pull $IMAGE && docker tag $IMAGE engram-agent:latest"
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans"
-          sleep 10
-          ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || true"
-          ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
-          DEPLOY_SCRIPT
-          
-          # Set deployment variables
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          DEPLOY_DIR="/opt/engram"  # Default, can be overridden
-          SSH_HOST="${{ secrets.DEPLOY_HOST }}"
-          SSH_USER="${{ secrets.DEPLOY_USER }}"
-          
-          # Override DEPLOY_DIR if secret is set
-          if [[ -n "${{ secrets.DEPLOY_PATH }}" ]]; then
-            DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-          fi
-          
-          echo "Deployment will target: ${SSH_USER}@${SSH_HOST}:${DEPLOY_DIR}"
-          
-          sed -i "s|__IMAGE__|${IMAGE}|g" deploy.sh
-          sed -i "s|__DEPLOY_DIR__|${DEPLOY_DIR}|g" deploy.sh
-          sed -i "s|__SSH_HOST__|${SSH_HOST}|g" deploy.sh
-          sed -i "s|__SSH_USER__|${SSH_USER}|g" deploy.sh
-          
+          # Write deployment script file by file
+          {
+            echo '#!/bin/bash'
+            echo 'set -e'
+            echo ''
+            echo 'IMAGE="'"$IMAGE"'"'
+            echo 'DEPLOY_DIR="/opt/engram"'
+            echo 'SSH_HOST="'"$SSH_HOST"'"'
+            echo 'SSH_USER="'"$SSH_USER"'"'
+            echo ''
+            echo 'echo "=== Deployment Configuration ==="'
+            echo 'echo "Image: $IMAGE"'
+            echo 'echo "Deploy directory: $DEPLOY_DIR"'
+            echo 'echo "SSH Host: $SSH_HOST"'
+            echo ''
+            echo 'cat > /tmp/update_llm.sh << '"'"'UPDATE_SCRIPT'"'"''
+            echo '#!/bin/bash'
+            echo 'ENV_FILE=.env'
+            echo '[[ -f $ENV_FILE ]] && cp $ENV_FILE $ENV_FILE.bak'
+            echo 'if [[ -f $ENV_FILE ]]; then grep -v "^LLM_" $ENV_FILE > $ENV_FILE.tmp && mv $ENV_FILE.tmp $ENV_FILE; fi'
+            echo 'cat >> $ENV_FILE << '"'"'LLM_CONF'"'"''
+            echo 'LLM_ENDPOINT=$LLM_ENDPOINT'
+            echo 'LLM_API_KEY=$LLM_API_KEY'
+            echo 'LLM_MODEL=$LLM_MODEL'
+            echo 'LLM_CHAT_PATH=$LLM_CHAT_PATH'
+            echo 'LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH'
+            echo 'LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT'
+            echo 'ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY'
+            echo 'ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM'
+            echo 'LLM_CONF'
+            echo 'UPDATE_SCRIPT'
+            echo ''
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose down --remove-orphans 2>/dev/null || true"'
+            echo 'TIMESTAMP=$(date +%Y%m%d_%H%M%S)'
+            echo 'ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"'
+            echo 'scp -r . $SSH_USER@$SSH_HOST:$DEPLOY_DIR/'
+            echo 'scp /tmp/update_llm.sh $SSH_USER@$SSH_HOST:$DEPLOY_DIR/update_llm.sh'
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && bash update_llm.sh"'
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker pull $IMAGE && docker tag $IMAGE engram-agent:latest"'
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans"'
+            echo 'sleep 10'
+            echo 'ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || true"'
+            echo 'ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"'
+            echo 'echo "=== Deployment complete ==="'
+          } > deploy.sh
           chmod +x deploy.sh
+          cat deploy.sh | head -20
 
       - name: Deploy to server
         run: |

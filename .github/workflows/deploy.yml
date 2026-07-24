@@ -103,19 +103,9 @@ jobs:
             exit 1
           fi
           
-          # Debug: Show length of secrets (masking actual values for security)
-          HOST_LEN=${#DEPLOY_HOST}
-          USER_LEN=${#DEPLOY_USER}
-          KEY_LEN=${#DEPLOY_SSH_KEY}
-          
-          echo "Secret validation passed:"
-          echo "  DEPLOY_HOST: ${HOST_LEN} chars"
-          echo "  DEPLOY_USER: ${USER_LEN} chars"
-          echo "  DEPLOY_SSH_KEY: ${KEY_LEN} chars"
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          echo "DEBUG: DEPLOY_HOST chars = ${#DEPLOY_HOST}"
+          echo "DEBUG: DEPLOY_USER chars = ${#DEPLOY_USER}"
+          echo "DEBUG: DEPLOY_SSH_KEY chars = ${#DEPLOY_SSH_KEY}"
 
       - name: Setup SSH known hosts
         run: |

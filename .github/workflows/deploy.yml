@@ -130,13 +130,13 @@ jobs:
           
           # Write deployment script file by file
           {
-            echo '#!/bin/bash'
-            echo 'set -e'
-            echo ''
-            echo 'IMAGE="'"$IMAGE"'"'
-            echo 'DEPLOY_DIR="$DEPLOY_DIR"'
-            echo 'SSH_HOST="'"$SSH_HOST"'"'
-            echo 'SSH_USER="'"$SSH_USER"'"'
+            echo "#!/bin/bash"
+            echo "set -e"
+            echo ""
+            echo "IMAGE=\"$IMAGE\""
+            echo "DEPLOY_DIR=\"${DEPLOY_DIR:-/home/$SSH_USER/engram}\""
+            echo "SSH_HOST=\"$SSH_HOST\""
+            echo "SSH_USER=\"$SSH_USER\""
             echo ''
             echo 'echo "=== Deployment Configuration ==="'
             echo 'echo "Image: $IMAGE"'

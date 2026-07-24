@@ -164,20 +164,18 @@ jobs:
           ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
           DEPLOY_SCRIPT
           
-          # Substitute the placeholders with defaults for missing secrets
+          # Set deployment variables
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          DEPLOY_DIR="${{ secrets.DEPLOY_PATH || '/opt/engram' }}"
+          DEPLOY_DIR="/opt/engram"  # Default, can be overridden
           SSH_HOST="${{ secrets.DEPLOY_HOST }}"
           SSH_USER="${{ secrets.DEPLOY_USER }}"
           
-          # Ensure paths don't have quotes and are not empty
-          DEPLOY_DIR=$(echo "$DEPLOY_DIR" | sed "s/'//g" | sed 's/^[[:space:]]*//g')
-          if [[ -z "$DEPLOY_DIR" ]] || [[ "$DEPLOY_DIR" == "***" ]]; then
-            DEPLOY_DIR="/opt/engram"
+          # Override DEPLOY_DIR if secret is set
+          if [[ -n "${{ secrets.DEPLOY_PATH }}" ]]; then
+            DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
           fi
           
-          echo "DEBUG: IMAGE=$IMAGE"
-          echo "DEBUG: DEPLOY_DIR=$DEPLOY_DIR"
+          echo "Deployment will target: ${SSH_USER}@${SSH_HOST}:${DEPLOY_DIR}"
           
           sed -i "s|__IMAGE__|${IMAGE}|g" deploy.sh
           sed -i "s|__DEPLOY_DIR__|${DEPLOY_DIR}|g" deploy.sh

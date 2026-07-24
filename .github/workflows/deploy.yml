@@ -130,7 +130,7 @@ jobs:
             echo "set -e"
             echo ""
             echo "IMAGE=\"$IMAGE\""
-            echo "DEPLOY_DIR=\"\$HOME/$DEPLOY_DIR\""
+            echo "DEPLOY_DIR=\"\$HOME/engram\""
             echo "SSH_HOST=\"$SSH_HOST\""
             echo "SSH_USER=\"$SSH_USER\""
             echo ''

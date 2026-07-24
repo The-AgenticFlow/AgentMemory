@@ -123,6 +123,7 @@ jobs:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_PATH }}
         run: |
           # Write deployment script file by file
           {
@@ -130,7 +131,7 @@ jobs:
             echo 'set -e'
             echo ''
             echo 'IMAGE="'"$IMAGE"'"'
-            echo 'DEPLOY_DIR="/opt/engram"'
+            echo 'DEPLOY_DIR="${DEPLOY_DIR:-/opt/engram}"'
             echo 'SSH_HOST="'"$SSH_HOST"'"'
             echo 'SSH_USER="'"$SSH_USER"'"'
             echo ''
@@ -174,6 +175,12 @@ jobs:
 
       - name: Deploy to server
         run: |
+          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
+          [[ -z "$DEPLOY_DIR" ]] && DEPLOY_DIR="/opt/engram"
+          
+          # Create deployment directory if it doesn't exist
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p $DEPLOY_DIR"
+          
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'
           export LLM_MODEL='${{ secrets.LLM_MODEL }}'

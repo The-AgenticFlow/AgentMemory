@@ -102,7 +102,20 @@ jobs:
             echo "Please configure these in GitHub repository settings > Secrets and variables > Actions"
             exit 1
           fi
-          echo "All required secrets are configured"
+          
+          # Debug: Show length of secrets (masking actual values for security)
+          HOST_LEN=${#DEPLOY_HOST}
+          USER_LEN=${#DEPLOY_USER}
+          KEY_LEN=${#DEPLOY_SSH_KEY}
+          
+          echo "Secret validation passed:"
+          echo "  DEPLOY_HOST: ${HOST_LEN} chars"
+          echo "  DEPLOY_USER: ${USER_LEN} chars"
+          echo "  DEPLOY_SSH_KEY: ${KEY_LEN} chars"
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Setup SSH known hosts
         run: |

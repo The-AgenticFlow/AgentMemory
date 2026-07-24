@@ -124,10 +124,6 @@ jobs:
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          # Set deployment directory
-          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-          [[ -z "$DEPLOY_DIR" ]] && DEPLOY_DIR="engram"
-          
           # Write deployment script file by file
           {
             echo "#!/bin/bash"
@@ -178,11 +174,12 @@ jobs:
 
       - name: Deploy to server
         run: |
-          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-          [[ -z "$DEPLOY_DIR" ]] && DEPLOY_DIR="engram"
+          # Check if DEPLOY_PATH is empty or masked as ***
+          _TMP="${{ secrets.DEPLOY_PATH }}"
+          [[ -z "$_TMP" || "$_TMP" == "***" ]] && DEPLOY_DIR="engram" || DEPLOY_DIR="$_TMP"
           
-          echo "Creating deployment directory: /home/\$USER/$DEPLOY_DIR..."
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p ~/$DEPLOY_DIR && chmod 755 ~/$DEPLOY_DIR"
+          echo "Creating deployment directory: ~/engram..."
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p ~/engram && chmod 755 ~/engram"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

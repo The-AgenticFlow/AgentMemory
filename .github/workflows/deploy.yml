@@ -34,7 +34,7 @@ jobs:
     needs: [validate-environment]
     if: needs.validate-environment.outputs.deploy_target == 'true'
     permissions:
-     _contents: read
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -189,22 +189,22 @@ jobs:
           echo "=== Cleanup ==="
           ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
 
-          echo "=== Deployment complete ==="
-          DEPLOY_SCRIPT
-          chmod +x deploy.sh
+           echo "=== Deployment complete ==="
+           DEPLOY_SCRIPT
+           chmod +x deploy.sh
 
-       - name: Deploy to server
-         run: |
-           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
-           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'
-           export LLM_MODEL='${{ secrets.LLM_MODEL }}'
-           export LLM_CHAT_PATH='${{ secrets.LLM_CHAT_PATH }}'
-           export LLM_EMBEDDINGS_PATH='${{ secrets.LLM_EMBEDDINGS_PATH }}'
-           export LLM_RERANK_ENDPOINT='${{ secrets.LLM_RERANK_ENDPOINT }}'
-           export ENGRAM_DASHSCOPE_API_KEY='${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}'
-           export ENGRAM_REQUIRE_LLM='${{ secrets.ENGRAM_REQUIRE_LLM }}'
-           
-           ./deploy.sh
+      - name: Deploy to server
+        run: |
+          export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
+          export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'
+          export LLM_MODEL='${{ secrets.LLM_MODEL }}'
+          export LLM_CHAT_PATH='${{ secrets.LLM_CHAT_PATH }}'
+          export LLM_EMBEDDINGS_PATH='${{ secrets.LLM_EMBEDDINGS_PATH }}'
+          export LLM_RERANK_ENDPOINT='${{ secrets.LLM_RERANK_ENDPOINT }}'
+          export ENGRAM_DASHSCOPE_API_KEY='${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}'
+          export ENGRAM_REQUIRE_LLM='${{ secrets.ENGRAM_REQUIRE_LLM }}'
+          
+          ./deploy.sh
 
   notify-deployment:
     runs-on: ubuntu-latest

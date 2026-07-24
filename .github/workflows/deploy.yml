@@ -116,45 +116,30 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Create deployment script
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/engram' }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           cat > deploy.sh << 'DEPLOY_SCRIPT'
           #!/bin/bash
           set -e
-
-          IMAGE="$IMAGE"
-          DEPLOY_DIR="$DEPLOY_PATH"
-          SSH_HOST="$DEPLOY_HOST"
-          SSH_USER="$DEPLOY_USER"
-
+          
+          IMAGE="__IMAGE__"
+          DEPLOY_DIR="__DEPLOY_DIR__"
+          SSH_HOST="__SSH_HOST__"
+          SSH_USER="__SSH_USER__"
+          
           echo "=== Deployment Configuration ==="
           echo "Image: $IMAGE"
           echo "Deploy directory: $DEPLOY_DIR"
           echo "SSH Host: $SSH_HOST"
-
-          # Create LLM config update script that preserves local Neo4j config
+          
           cat > /tmp/update_llm.sh << 'UPDATE_SCRIPT'
           #!/bin/bash
-          # Update only LLM configuration, preserve Neo4j config
           ENV_FILE=.env
-          
-          # Backup existing .env if it exists
           [[ -f $ENV_FILE ]] && cp $ENV_FILE $ENV_FILE.bak
-          
-          # Update LLM configuration (or create if missing)
           if [[ -f $ENV_FILE ]]; then
-            # Remove old LLM config if exists
             grep -v "^LLM_" $ENV_FILE > $ENV_FILE.tmp && mv $ENV_FILE.tmp $ENV_FILE
           fi
-          
-          # Append new LLM configuration
           cat >> $ENV_FILE << 'LLM_CONF'
           
-          # LLM Configuration (updated by deployment)
           LLM_ENDPOINT=$LLM_ENDPOINT
           LLM_API_KEY=$LLM_API_KEY
           LLM_MODEL=$LLM_MODEL
@@ -165,37 +150,26 @@ jobs:
           ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM
           LLM_CONF
           UPDATE_SCRIPT
-
-          echo "=== Stopping existing container ==="
+          
           ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose down --remove-orphans 2>/dev/null || true"
-
-          echo "=== Creating backup ==="
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"
-
-          echo "=== Updating deployment files ==="
           scp -r . $SSH_USER@$SSH_HOST:$DEPLOY_DIR/
           scp /tmp/update_llm.sh $SSH_USER@$SSH_HOST:$DEPLOY_DIR/update_llm.sh
           ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && bash update_llm.sh"
-
-          echo "=== Pulling image ==="
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker pull $IMAGE"
-
-          echo "=== Updating image tag ==="
-          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker tag $IMAGE engram-agent:latest"
-
-          echo "=== Starting services ==="
+          ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker pull $IMAGE && docker tag $IMAGE engram-agent:latest"
           ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans"
-
-          echo "=== Checking health ==="
           sleep 10
-          ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || echo 'Health check failed'"
-
-          echo "=== Cleanup ==="
+          ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || true"
           ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
-
-          echo "=== Deployment complete ==="
           DEPLOY_SCRIPT
+          
+          # Substitute the placeholders
+          sed -i "s|__IMAGE__|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}|g" deploy.sh
+          sed -i "s|__DEPLOY_DIR__|${{ secrets.DEPLOY_PATH || '/opt/engram' }}|g" deploy.sh
+          sed -i "s|__SSH_HOST__|${{ secrets.DEPLOY_HOST }}|g" deploy.sh
+          sed -i "s|__SSH_USER__|${{ secrets.DEPLOY_USER }}|g" deploy.sh
+          
           chmod +x deploy.sh
 
       - name: Deploy to server

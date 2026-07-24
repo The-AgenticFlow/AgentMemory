@@ -164,11 +164,17 @@ jobs:
           ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"
           DEPLOY_SCRIPT
           
-          # Substitute the placeholders
-          sed -i "s|__IMAGE__|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}|g" deploy.sh
-          sed -i "s|__DEPLOY_DIR__|${{ secrets.DEPLOY_PATH || '/opt/engram' }}|g" deploy.sh
-          sed -i "s|__SSH_HOST__|${{ secrets.DEPLOY_HOST }}|g" deploy.sh
-          sed -i "s|__SSH_USER__|${{ secrets.DEPLOY_USER }}|g" deploy.sh
+          # Substitute the placeholders with defaults for missing secrets
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
+          DEPLOY_DIR="${DEPLOY_DIR:=/opt/engram}"
+          SSH_HOST="${{ secrets.DEPLOY_HOST }}"
+          SSH_USER="${{ secrets.DEPLOY_USER }}"
+          
+          sed -i "s|__IMAGE__|${IMAGE}|g" deploy.sh
+          sed -i "s|__DEPLOY_DIR__|${DEPLOY_DIR}|g" deploy.sh
+          sed -i "s|__SSH_HOST__|${SSH_HOST}|g" deploy.sh
+          sed -i "s|__SSH_USER__|${SSH_USER}|g" deploy.sh
           
           chmod +x deploy.sh
 

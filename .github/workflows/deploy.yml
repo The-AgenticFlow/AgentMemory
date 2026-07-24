@@ -125,13 +125,16 @@ jobs:
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_PATH }}
         run: |
+          # Set default deployment directory if not provided
+          DEPLOY_DIR="${DEPLOY_DIR:-/home/$SSH_USER/engram}"
+          
           # Write deployment script file by file
           {
             echo '#!/bin/bash'
             echo 'set -e'
             echo ''
             echo 'IMAGE="'"$IMAGE"'"'
-            echo 'DEPLOY_DIR="${DEPLOY_DIR:-/opt/engram}"'
+            echo 'DEPLOY_DIR="$DEPLOY_DIR"'
             echo 'SSH_HOST="'"$SSH_HOST"'"'
             echo 'SSH_USER="'"$SSH_USER"'"'
             echo ''
@@ -175,11 +178,9 @@ jobs:
 
       - name: Deploy to server
         run: |
-          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-          [[ -z "$DEPLOY_DIR" ]] && DEPLOY_DIR="/opt/engram"
-          
-          # Create deployment directory if it doesn't exist
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p $DEPLOY_DIR"
+          echo "Creating deployment directory with SSH..."
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram" || \
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo mkdir -p /opt/engram && sudo chown -R ${{ secrets.DEPLOY_USER }} /opt/engram"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

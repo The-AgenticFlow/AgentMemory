@@ -36,6 +36,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      packages: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +92,9 @@ jobs:
     needs: [build-and-push, validate-environment]
     if: needs.validate-environment.outputs.deploy_target == 'true'
     environment: production
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Validate required secrets
         run: |

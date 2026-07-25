@@ -178,10 +178,13 @@ jobs:
           chmod +x deploy.sh
           cat deploy.sh | head -20
 
-      - name: Deploy to server
+- name: Deploy to server
         run: |
-          echo "Creating deployment directory: /home/\$USER/engram..."
+          echo "Creating deployment directory: /home/$USER/engram..."
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram"
+          
+          echo "Logging into GitHub Container Registry..."
+          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

@@ -120,10 +120,16 @@ jobs:
 
       - name: Create deployment script
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          SHA: ${{ github.sha }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
         run: |
+          # Lowercase the repository name for Docker compatibility
+          IMAGE_NAME_LOWER="${IMAGE_NAME,,}"
+          IMAGE="$REGISTRY/$IMAGE_NAME_LOWER:$SHA"
+          
           # Write deployment script file by file
           {
             echo "#!/bin/bash"

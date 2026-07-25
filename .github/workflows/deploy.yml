@@ -130,7 +130,7 @@ jobs:
             echo "set -e"
             echo ""
             echo "IMAGE=\"$IMAGE\""
-            echo "DEPLOY_DIR=\"\$HOME/engram\""
+            echo "DEPLOY_DIR=\"/home/$SSH_USER/engram\""
             echo "SSH_HOST=\"$SSH_HOST\""
             echo "SSH_USER=\"$SSH_USER\""
             echo ''
@@ -174,12 +174,8 @@ jobs:
 
       - name: Deploy to server
         run: |
-          # Check if DEPLOY_PATH is empty or masked as ***
-          _TMP="${{ secrets.DEPLOY_PATH }}"
-          [[ -z "$_TMP" || "$_TMP" == "***" ]] && DEPLOY_DIR="engram" || DEPLOY_DIR="$_TMP"
-          
-          echo "Creating deployment directory: ~/engram..."
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p ~/engram && chmod 755 ~/engram"
+          echo "Creating deployment directory: /home/\$USER/engram..."
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

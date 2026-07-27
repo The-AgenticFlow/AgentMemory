@@ -6,10 +6,12 @@ services:
     environment:
       ENGRAM_SERVER_ADDR: 0.0.0.0:3001
       ENGRAM_DATA_DIR: /data
-      # Neo4j config comes from local .env file
+      ENGRAM_NEO4J_URI: ${ENGRAM_NEO4J_URI}
+      ENGRAM_NEO4J_USER: ${ENGRAM_NEO4J_USER}
+      ENGRAM_NEO4J_PASSWORD: ${ENGRAM_NEO4J_PASSWORD}
+      ENGRAM_NEO4J_DATABASE: ${ENGRAM_NEO4J_DATABASE}
       ENGRAM_MCP_HTTP_ENABLED: "true"
       ENGRAM_MCP_STDIO_ENABLED: "true"
-      # LLM config (updated by deployment)
       LLM_ENDPOINT: ${LLM_ENDPOINT}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
@@ -20,9 +22,47 @@ services:
       ENGRAM_REQUIRE_LLM: ${ENGRAM_REQUIRE_LLM}
       RUST_LOG: info
     restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - engram-net
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/engram-memory
+      NEO4J_server_http_enabled: "true"
+      NEO4J_server_bolt_enabled: "true"
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - engram-neo4j-data:/data
+      - engram-neo4j-logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+    networks:
+      - engram-net
+
+networks:
+  engram-net:
+    driver: bridge
+
+volumes:
+  engram-data:
+  engram-neo4j-data:
+  engram-neo4j-logs:

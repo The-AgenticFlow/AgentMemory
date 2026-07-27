@@ -175,9 +175,9 @@ jobs:
             echo ''
             echo "ssh \$SSH_USER@\$SSH_HOST \"sudo docker stop \$(sudo docker ps -aq) 2>/dev/null || true\""
             echo "ssh \$SSH_USER@\$SSH_HOST \"sudo docker rm \$(sudo docker ps -aq) 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo docker network prune -f 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"fuser -k 7474/tcp 7687/tcp 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"cd \$DEPLOY_DIR \\&\\& sudo docker compose down --remove-orphans -v 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"cd \$DEPLOY_DIR \\&\\& sudo docker compose down --remove-orphans 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo fuser -k 7474/tcp 7687/tcp 2>/dev/null || sudo lsof -t -i :7474 -i :7687 | xargs -r kill -9 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo sleep 5\""
             echo 'TIMESTAMP=$(date +%Y%m%d_%H%M%S)'
             echo 'ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"'
             echo 'tar --exclude=.git --exclude=.agents --exclude=target --exclude=web/node_modules --exclude=web/dist -czf - . | ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && tar -xzf -"'

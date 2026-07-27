@@ -182,7 +182,7 @@ jobs:
             echo 'scp /tmp/update_llm.sh $SSH_USER@$SSH_HOST:$DEPLOY_DIR/update_llm.sh'
             echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && bash update_llm.sh"'
             echo 'ssh $SSH_USER@$SSH_HOST "sudo docker pull $IMAGE && sudo docker tag $IMAGE engram-agent:latest"'
-            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && sudo docker compose up -d --remove-orphans"'
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && sudo docker compose up -d --remove-orphans --force-recreate"'
             echo 'echo "Waiting 60 seconds for Neo4j to start..."'
             echo 'sleep 60'
             echo 'ssh $SSH_USER@$SSH_HOST "curl -sf http://localhost:7474 || echo Neo4j not ready yet"'

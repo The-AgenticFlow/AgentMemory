@@ -71,7 +71,7 @@ services:
       - neo4j-data:/data
       - neo4j-logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:7474 >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 15

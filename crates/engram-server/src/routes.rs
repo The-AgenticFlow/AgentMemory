@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -18,7 +18,7 @@ use engram_runtime::{
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tracing::Subscriber;
 
 use uuid::Uuid;
@@ -28,7 +28,7 @@ type ApiResult<T> = Result<T, (StatusCode, String)>;
 // In-memory log buffer for exposing logs via HTTP
 const MAX_LOG_ENTRIES: usize = 1000;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: u64,
     pub level: String,
@@ -58,7 +58,7 @@ impl Default for LogBuffer {
 
 impl LogBuffer {
     pub fn add(&self, entry: LogEntry) {
-        let mut entries = self.entries.blocking_lock();
+        let mut entries = self.entries.lock().unwrap();
         if entries.len() >= MAX_LOG_ENTRIES {
             entries.remove(0);
         }
@@ -66,7 +66,7 @@ impl LogBuffer {
     }
 
     pub async fn get_recent(&self, limit: usize) -> Vec<LogEntry> {
-        let entries = self.entries.lock().await;
+        let entries = self.entries.lock().unwrap();
         entries.iter().rev().take(limit).cloned().collect()
     }
 }
@@ -409,6 +409,58 @@ pub async fn get_logs(
         .get_recent(query.limit.min(MAX_LOG_ENTRIES))
         .await;
     Json(logs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{self, Body};
+    use axum::http::Request;
+    use serde_json::Value;
+    use tower::util::ServiceExt;
+
+    #[tokio::test]
+    async fn log_buffer_adds_and_returns_recent_entries() {
+        let buffer = LogBuffer::new();
+        buffer.add(LogEntry {
+            timestamp: 1,
+            level: "info".to_string(),
+            target: "test".to_string(),
+            message: "hello".to_string(),
+            fields: serde_json::json!({}),
+        });
+
+        let recent = buffer.get_recent(10).await;
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].message, "hello");
+    }
+
+    #[tokio::test]
+    async fn get_logs_route_returns_json_entries() {
+        let state = AppState {
+            system: MemorySystem::new(),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            log_buffer: LogBuffer::new(),
+        };
+        state.log_buffer.add(LogEntry {
+            timestamp: 2,
+            level: "info".to_string(),
+            target: "route-test".to_string(),
+            message: "route works".to_string(),
+            fields: serde_json::json!({}),
+        });
+
+        let app = router(state);
+        let response = app
+            .oneshot(Request::builder().uri("/logs").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body::to_bytes(response.into_body(), 8192).await.unwrap();
+        let logs: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(logs[0]["message"], "route works");
+    }
 }
 
 pub async fn control_overview(

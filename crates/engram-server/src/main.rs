@@ -16,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     let log_buffer = LogBuffer::new();
     init_tracing(log_buffer.clone());
+    tracing::info!("engram-server tracing initialized");
 
     if std::env::args().nth(1).as_deref() == Some("mcp-stdio") {
         let state = app_state_from_env(log_buffer).await?;
@@ -38,7 +39,9 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_tracing(log_buffer: LogBuffer) {
-    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(env_filter);
 
     let capture_layer = LogCaptureLayer::new(log_buffer);
 

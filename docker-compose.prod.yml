@@ -49,12 +49,6 @@ services:
     volumes:
       - engram-neo4j-data:/data
       - engram-neo4j-logs:/logs
-    healthcheck:
-      test: ["CMD-SHELL", "lsof -i :7474 || exit 0"]
-      interval: 15s
-      timeout: 5s
-      retries: 60
-      start_period: 300s
     restart: unless-stopped
     networks:
       - engram-net

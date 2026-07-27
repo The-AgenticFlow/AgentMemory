@@ -156,7 +156,7 @@ jobs:
             echo '#!/bin/bash'
             echo 'ENV_FILE=.env'
             echo '[[ -f $ENV_FILE ]] && cp $ENV_FILE $ENV_FILE.bak'
-            echo 'if [[ -f $ENV_FILE ]]; then grep -v "^LLM_" $ENV_FILE | grep -v "^ENGRAM_NEO4J_" > $ENV_FILE.tmp && mv $ENV_FILE.tmp $ENV_FILE; fi'
+            echo 'if [[ -f $ENV_FILE ]]; then grep -v "^LLM_" $ENV_FILE > $ENV_FILE.tmp && mv $ENV_FILE.tmp $ENV_FILE; fi'
             echo 'cat >> $ENV_FILE << '"'"'LLM_CONF'"'"''
             echo 'LLM_ENDPOINT=$LLM_ENDPOINT'
             echo 'LLM_API_KEY=$LLM_API_KEY'
@@ -166,10 +166,6 @@ jobs:
             echo 'LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT'
             echo 'ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY'
             echo 'ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM'
-            echo 'ENGRAM_NEO4J_URI=$ENGRAM_NEO4J_URI'
-            echo 'ENGRAM_NEO4J_USER=$ENGRAM_NEO4J_USER'
-            echo 'ENGRAM_NEO4J_PASSWORD=$ENGRAM_NEO4J_PASSWORD'
-            echo 'ENGRAM_NEO4J_DATABASE=$ENGRAM_NEO4J_DATABASE'
             echo 'LLM_CONF'
             echo 'UPDATE_SCRIPT'
             echo ''
@@ -211,10 +207,6 @@ jobs:
           export LLM_RERANK_ENDPOINT='${{ secrets.LLM_RERANK_ENDPOINT }}'
           export ENGRAM_DASHSCOPE_API_KEY='${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}'
           export ENGRAM_REQUIRE_LLM='${{ secrets.ENGRAM_REQUIRE_LLM }}'
-          export ENGRAM_NEO4J_URI='${{ secrets.ENGRAM_NEO4J_URI }}'
-          export ENGRAM_NEO4J_USER='${{ secrets.ENGRAM_NEO4J_USER }}'
-          export ENGRAM_NEO4J_PASSWORD='${{ secrets.ENGRAM_NEO4J_PASSWORD }}'
-          export ENGRAM_NEO4J_DATABASE='${{ secrets.ENGRAM_NEO4J_DATABASE }}'
           
           ./deploy.sh
 

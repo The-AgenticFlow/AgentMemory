@@ -1,6 +1,6 @@
 services:
   engram:
-    image: ghcr.io/${{ github.repository }}:${{ github.sha }}
+    image: engram-agent:latest
     env_file:
       - .env
     environment:

@@ -48,7 +48,15 @@ impl LogBuffer {
             entries: Arc::new(Mutex::new(Vec::with_capacity(MAX_LOG_ENTRIES))),
         }
     }
+}
 
+impl Default for LogBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LogBuffer {
     pub fn add(&self, entry: LogEntry) {
         let mut entries = self.entries.blocking_lock();
         if entries.len() >= MAX_LOG_ENTRIES {
@@ -396,7 +404,10 @@ pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
 ) -> Json<Vec<LogEntry>> {
-    let logs = state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await;
+    let logs = state
+        .log_buffer
+        .get_recent(query.limit.min(MAX_LOG_ENTRIES))
+        .await;
     Json(logs)
 }
 

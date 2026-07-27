@@ -1,7 +1,10 @@
 use std::net::SocketAddr;
 
 use engram_qwen::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
-use engram_server::{AppState, build_app, mcp, routes::{LogBuffer, LogCaptureLayer}};
+use engram_server::{
+    AppState, build_app, mcp,
+    routes::{LogBuffer, LogCaptureLayer},
+};
 use tokio::net::TcpListener;
 use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -35,11 +38,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_tracing(log_buffer: LogBuffer) {
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_filter(EnvFilter::from_default_env());
-    
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env());
+
     let capture_layer = LogCaptureLayer::new(log_buffer);
-    
+
     let _ = tracing_subscriber::registry()
         .with(fmt_layer)
         .with(capture_layer)
@@ -47,8 +49,10 @@ fn init_tracing(log_buffer: LogBuffer) {
 }
 
 async fn app_state_from_env(log_buffer: LogBuffer) -> anyhow::Result<AppState> {
-    let mut state = AppState::default();
-    state.log_buffer = log_buffer;
+    let mut state = AppState {
+        log_buffer,
+        ..Default::default()
+    };
     let require_llm = std::env::var("ENGRAM_REQUIRE_LLM")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("true"))

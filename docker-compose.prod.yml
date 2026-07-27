@@ -23,7 +23,8 @@ services:
       RUST_LOG: info
     restart: unless-stopped
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
       interval: 10s
@@ -45,6 +46,12 @@ services:
     volumes:
       - engram-neo4j-data:/data
       - engram-neo4j-logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 7687 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
     restart: unless-stopped
     networks:
       - engram-net

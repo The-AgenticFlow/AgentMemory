@@ -70,11 +70,6 @@ services:
     volumes:
       - neo4j-data:/data
       - neo4j-logs:/logs
-    healthcheck:
-      test: ["CMD-SHELL", "lsof -i :7474 || exit 0"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
     restart: unless-stopped
 
 volumes:

@@ -36,7 +36,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      packages: read
       id-token: write
     steps:
       - uses: actions/checkout@v4

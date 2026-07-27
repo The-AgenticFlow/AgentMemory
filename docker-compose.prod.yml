@@ -50,10 +50,11 @@ services:
       - engram-neo4j-data:/data
       - engram-neo4j-logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:7474 >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
     restart: unless-stopped
     networks:
       - engram-net

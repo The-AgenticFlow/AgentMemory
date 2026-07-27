@@ -171,7 +171,7 @@ jobs:
             echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && sudo docker compose down --remove-orphans 2>/dev/null || true"'
             echo 'TIMESTAMP=$(date +%Y%m%d_%H%M%S)'
             echo 'ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"'
-            echo 'scp -r . $SSH_USER@$SSH_HOST:$DEPLOY_DIR/'
+            echo 'tar --exclude=.git --exclude=.agents --exclude=target --exclude=web/node_modules --exclude=web/dist -czf - . | ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && tar -xzf -"'
             echo 'scp /tmp/update_llm.sh $SSH_USER@$SSH_HOST:$DEPLOY_DIR/update_llm.sh'
             echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && bash update_llm.sh"'
             echo 'ssh $SSH_USER@$SSH_HOST "sudo docker pull $IMAGE && sudo docker tag $IMAGE engram-agent:latest"'

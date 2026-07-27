@@ -64,7 +64,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=semver,pattern={{version}}
-            type=sha,prefix=
+            type=sha,format=long,prefix=
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -188,7 +188,7 @@ jobs:
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram"
           
           echo "Logging into GitHub Container Registry..."
-          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

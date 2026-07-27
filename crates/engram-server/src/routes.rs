@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -17,15 +18,136 @@ use engram_runtime::{
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
+use tracing::Subscriber;
+
 use uuid::Uuid;
 
 type ApiResult<T> = Result<T, (StatusCode, String)>;
+
+// In-memory log buffer for exposing logs via HTTP
+const MAX_LOG_ENTRIES: usize = 1000;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogEntry {
+    pub timestamp: u64,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+    pub fields: serde_json::Value,
+}
+
+#[derive(Clone)]
+pub struct LogBuffer {
+    entries: Arc<Mutex<Vec<LogEntry>>>,
+}
+
+impl LogBuffer {
+    pub fn new() -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(Vec::with_capacity(MAX_LOG_ENTRIES))),
+        }
+    }
+
+    pub fn add(&self, entry: LogEntry) {
+        let mut entries = self.entries.blocking_lock();
+        if entries.len() >= MAX_LOG_ENTRIES {
+            entries.remove(0);
+        }
+        entries.push(entry);
+    }
+
+    pub async fn get_recent(&self, limit: usize) -> Vec<LogEntry> {
+        let entries = self.entries.lock().await;
+        entries.iter().rev().take(limit).cloned().collect()
+    }
+}
+
+// Custom tracing layer to capture logs
+pub struct LogCaptureLayer {
+    buffer: LogBuffer,
+}
+
+impl LogCaptureLayer {
+    pub fn new(buffer: LogBuffer) -> Self {
+        Self { buffer }
+    }
+}
+
+impl<S: Subscriber> tracing_subscriber::Layer<S> for LogCaptureLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let metadata = event.metadata();
+        let mut visitor = LogVisitor::new();
+        event.record(&mut visitor);
+
+        let entry = LogEntry {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs(),
+            level: metadata.level().to_string(),
+            target: metadata.target().to_string(),
+            message: visitor.message,
+            fields: visitor.fields,
+        };
+
+        self.buffer.add(entry);
+    }
+}
+
+struct LogVisitor {
+    message: String,
+    fields: serde_json::Value,
+}
+
+impl LogVisitor {
+    fn new() -> Self {
+        Self {
+            message: String::new(),
+            fields: serde_json::json!({}),
+        }
+    }
+}
+
+impl tracing::field::Visit for LogVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value).trim_matches('"').to_string();
+        } else {
+            self.fields[field.name()] = serde_json::Value::String(format!("{:?}", value));
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        } else {
+            self.fields[field.name()] = serde_json::Value::String(value.to_string());
+        }
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.fields[field.name()] = serde_json::Value::Number(value.into());
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.fields[field.name()] = serde_json::Value::Number(value.into());
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.fields[field.name()] = serde_json::Value::Bool(value);
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub system: MemorySystem,
     pub sessions: Arc<RwLock<HashMap<Uuid, SessionHandle>>>,
+    pub log_buffer: LogBuffer,
 }
 
 impl Default for AppState {
@@ -36,16 +158,23 @@ impl Default for AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        let log_buffer = LogBuffer::new();
         Self {
             system: MemorySystem::new(),
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            log_buffer,
         }
+    }
+
+    pub fn log_buffer(&self) -> LogBuffer {
+        self.log_buffer.clone()
     }
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/logs", get(get_logs))
         .route("/mcp", post(crate::mcp::mcp_http))
         .route("/control/overview", get(control_overview))
         .route("/control/graph", get(control_graph))
@@ -251,6 +380,24 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         qwen_connected: state.system.qwen.is_some(),
         llm_connected: state.system.llm.is_some(),
     })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogsQuery {
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+}
+
+fn default_limit() -> usize {
+    100
+}
+
+pub async fn get_logs(
+    State(state): State<AppState>,
+    Query(query): Query<LogsQuery>,
+) -> Json<Vec<LogEntry>> {
+    let logs = state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await;
+    Json(logs)
 }
 
 pub async fn control_overview(

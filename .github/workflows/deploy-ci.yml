@@ -25,6 +25,8 @@ jobs:
             echo "deploy=true" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.action }}" == "closed" && "${{ github.event.pull_request.merged }}" == "true" ]]; then
             echo "deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
           else
             echo "deploy=false" >> $GITHUB_OUTPUT
           fi

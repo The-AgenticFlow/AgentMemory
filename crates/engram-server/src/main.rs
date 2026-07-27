@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     let app = build_app(app_state_from_env(log_buffer).await?);
 
-    println!("engram-server listening on http://{addr}");
+    tracing::info!("engram-server listening on http://{addr}");
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -62,11 +62,11 @@ async fn app_state_from_env(log_buffer: LogBuffer) -> anyhow::Result<AppState> {
         let config = LlmConfig::from_env()?;
         let client = LlmClient::new(config);
         state.system = state.system.with_llm(client);
-        println!("[engram-server] LLM client connected: {}", endpoint);
+        tracing::info!("[engram-server] LLM client connected: {}", endpoint);
     } else if let Ok(api_key) = std::env::var("ENGRAM_DASHSCOPE_API_KEY") {
         let client = DashScopeClient::new(DashScopeConfig::new(api_key)?);
         state.system = state.system.with_qwen(client);
-        println!("[engram-server] Qwen client connected (DashScope).");
+        tracing::info!("[engram-server] Qwen client connected (DashScope).");
     } else {
         let msg = "[engram-server] LLM client NOT connected: LLM_ENDPOINT or ENGRAM_DASHSCOPE_API_KEY is missing. Chat will use local fallback replies.";
         if require_llm {
@@ -75,7 +75,7 @@ async fn app_state_from_env(log_buffer: LogBuffer) -> anyhow::Result<AppState> {
                 msg
             );
         }
-        println!("{}", msg);
+        tracing::info!("{}", msg);
     }
 
     // Retry initialization with exponential backoff so the server survives

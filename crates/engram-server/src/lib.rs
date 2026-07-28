@@ -23,13 +23,15 @@ pub fn build_app(state: AppState) -> Router {
     } else {
         "web"
     };
-    routes::router(state)
+    let app = routes::router(state)
         .fallback_service(
             ServeDir::new(web_root)
                 .not_found_service(ServeFile::new(format!("{web_root}/index.html"))),
         )
         .layer(middleware::from_fn(api_token_auth))
-        .layer(cors_layer())
+        .layer(cors_layer());
+    tracing::warn!("[CRITICAL] Router built with fallback_service for web_root={}", web_root);
+    app
 }
 
 fn cors_layer() -> CorsLayer {
@@ -59,7 +61,7 @@ async fn api_token_auth(request: Request<Body>, next: Next) -> Result<Response, 
         return Ok(next.run(request).await);
     };
     let path = request.uri().path();
-    if path == "/health" || path == "/logs" {
+    if path == "/health" || path == "/logs" || path == "/logstest" {
         return Ok(next.run(request).await);
     }
     let authorized = request

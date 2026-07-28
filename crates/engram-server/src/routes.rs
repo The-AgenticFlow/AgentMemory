@@ -398,6 +398,8 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 pub struct LogsQuery {
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub format: String,
 }
 
 fn default_limit() -> usize {
@@ -407,23 +409,114 @@ fn default_limit() -> usize {
 pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
-) -> Json<Vec<LogEntry>> {
-    let log_count = {
-        let entries = state.log_buffer.entries.lock().unwrap();
-        entries.len()
-    };
-    tracing::info!(
-        "[get_logs] GET /logs called - buffer has {} entries, limit={}",
-        log_count,
-        query.limit
-    );
+) -> Result<String, (StatusCode, String)> {
+    let logs = state
+        .log_buffer
+        .get_recent(query.limit.min(MAX_LOG_ENTRIES))
+        .await;
 
-    Json(
-        state
-            .log_buffer
-            .get_recent(query.limit.min(MAX_LOG_ENTRIES))
-            .await,
-    )
+    if query.format == "text" || query.format.is_empty() {
+        let colored_output = format_colored_logs(&logs);
+        Ok(colored_output)
+    } else {
+        Ok(serde_json::to_string_pretty(&logs).unwrap_or_default())
+    }
+}
+
+fn format_colored_logs(logs: &[LogEntry]) -> String {
+    let mut output = String::new();
+
+    // ANSI color codes
+    let reset = "\x1b[0m";
+    let bold = "\x1b[1m";
+    let dim = "\x1b[2m";
+
+    // Level colors
+    let error_color = "\x1b[31m"; // Red
+    let warn_color = "\x1b[33m"; // Yellow
+    let info_color = "\x1b[36m"; // Cyan
+    let debug_color = "\x1b[90m"; // Bright Black (Gray)
+    let _success_color = "\x1b[32m"; // Green (reserved for future use)
+    let trace_color = "\x1b[90m"; // Gray
+
+    // Level badges
+    output.push_str(&format!(
+        "{}{}━━━ Engram Logs ━━━{}{}\n",
+        bold, info_color, reset, dim
+    ));
+
+    if logs.is_empty() {
+        output.push_str(&format!("{}  No logs captured yet{}  \n", dim, reset));
+        return output;
+    }
+
+    for log in logs {
+        let (level_color, level_badge) = match log.level.to_uppercase().as_str() {
+            "ERROR" => (error_color, "✗"),
+            "WARN" | "WARNING" => (warn_color, "⚠"),
+            "INFO" => (info_color, "ℹ"),
+            "DEBUG" => (debug_color, "⚐"),
+            "TRACE" => (trace_color, "⊙"),
+            _ => (dim, "·"),
+        };
+
+        let timestamp = format_timestamp(log.timestamp);
+        let message = truncate_message(&log.message, 120);
+        let fields_str = serde_json::to_string(&log.fields).unwrap_or_default();
+
+        output.push_str(&format!(
+            "{}{}{}{} {}{}{}  {}{}{}\n",
+            level_color,
+            level_badge,
+            reset,
+            timestamp,
+            level_color,
+            log.level.to_uppercase(),
+            reset,
+            dim,
+            message,
+            reset
+        ));
+
+        // Show fields if present and not empty object
+        if !fields_str.is_empty() && fields_str != "{}" {
+            output.push_str(&format!("{}  └─ {}{}\n", dim, fields_str, reset));
+        }
+
+        // Show target if not generic
+        if !log.target.is_empty() && !log.target.contains("tracing") && !log.target.contains("fmt")
+        {
+            output.push_str(&format!(
+                "{}      └─ target: {}{}\n",
+                dim, log.target, reset
+            ));
+        }
+    }
+
+    output.push_str(&format!(
+        "\n{}Showing {} of {} entries{}",
+        dim,
+        logs.len(),
+        logs.len(),
+        reset
+    ));
+    output
+}
+
+fn format_timestamp(ts: u64) -> String {
+    use chrono::{TimeZone, Utc};
+    match Utc.timestamp_opt(ts as i64, 0) {
+        chrono::LocalResult::Single(dt) => dt.format("%H:%M:%S").to_string(),
+        _ => format!("{}", ts),
+    }
+}
+
+fn truncate_message(msg: &str, max_len: usize) -> String {
+    if msg.len() <= max_len {
+        msg.to_string()
+    } else {
+        format!("{}...", &msg[..max_len.saturating_sub(3)])
+    }
 }
 
 #[cfg(test)]
@@ -431,7 +524,6 @@ mod tests {
     use super::*;
     use axum::body::{self, Body};
     use axum::http::Request;
-    use serde_json::Value;
     use tower::util::ServiceExt;
 
     #[tokio::test]
@@ -467,14 +559,19 @@ mod tests {
 
         let app = router(state);
         let response = app
-            .oneshot(Request::builder().uri("/logs").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/logs?format=text")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = body::to_bytes(response.into_body(), 8192).await.unwrap();
-        let logs: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(logs[0]["message"], "route works");
+        let response_text = String::from_utf8_lossy(&body);
+        assert!(response_text.contains("route works"));
     }
 }
 

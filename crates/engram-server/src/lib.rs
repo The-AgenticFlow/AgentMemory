@@ -64,7 +64,7 @@ async fn api_token_auth(request: Request<Body>, next: Next) -> Result<Response, 
         return Ok(next.run(request).await);
     };
     let path = request.uri().path();
-    if path == "/health" || path == "/logs" || path == "/logstest" {
+    if path == "/health" || path == "/logs" || path == "/logstest123" {
         return Ok(next.run(request).await);
     }
     let authorized = request

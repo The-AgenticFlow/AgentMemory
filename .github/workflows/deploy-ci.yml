@@ -153,8 +153,9 @@ jobs:
           echo "Logging into GitHub Container Registry..."
           echo "${{ github.token }}" | ssh "$SSH_USER@$SSH_HOST" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
 
-          # Upload deploy.sh to server
-          scp deploy.sh "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/deploy.sh"
+          # Transfer project files (compose, configs, etc.) to the server
+          echo "Transferring files..."
+          tar --exclude=.git --exclude=.agents --exclude=target --exclude=web/node_modules --exclude=web/dist -czf - . | ssh "$SSH_USER@$SSH_HOST" "mkdir -p /home/$SSH_USER/engram && cd /home/$SSH_USER/engram && tar -xzf -"
 
           # Upload .env file with all LLM settings
           {

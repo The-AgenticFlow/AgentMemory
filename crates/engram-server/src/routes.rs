@@ -187,8 +187,8 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/logstest123", axum::routing::get(|| async { "ROUTE_WORKS_V1" }))
         .route("/logs", get(get_logs))
-        .route("/logstest", axum::routing::get(|| async { "LOGS_ENDPOINT_WORKING" }))
         .route("/mcp", post(crate::mcp::mcp_http))
         .route("/control/overview", get(control_overview))
         .route("/control/graph", get(control_graph))
@@ -415,6 +415,14 @@ pub async fn get_logs(
         entries.len()
     };
     tracing::info!("[get_logs] GET /logs called - buffer has {} entries, limit={}", log_count, query.limit);
+    
+    // Return a test response that proves the route works
+    let test_response = serde_json::json!({
+        "route": "/logs",
+        "working": true,
+        "buffer_entries": log_count,
+        "limit": query.limit
+    });
     
     Json(state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await)
 }

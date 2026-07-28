@@ -8,7 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 engram-core = { path = "../engram-core" }
-engram-qwen = { path = "../engram-qwen" }
+engram-llm = { path = "../engram-llm" }
 engram-store = { path = "../engram-store" }
 lazy_static.workspace = true
 serde.workspace = true

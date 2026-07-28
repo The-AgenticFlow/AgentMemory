@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use engram_core::{Episode, MetaEngram, Session, SessionMode, ThalamusScores, WorkingContext};
-use engram_qwen::{DashScopeClient, LlmClient};
+use engram_llm::{DashScopeClient, LlmClient};
 use engram_store::{
     ConfigAuditRecord, IngestionRecord, Neo4jHealth, Neo4jMemoryStore, OssMemoryStore,
     PostgresMemoryStore, QdrantMemoryStore,

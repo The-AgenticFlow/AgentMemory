@@ -11,7 +11,7 @@ use engram_core::{
     BankType, DispositionConfig, Episode, MemoryBank, RetrievalState, Session, SessionMode,
     WorkingContext,
 };
-use engram_qwen::chat::{ChatMessage, ChatRequest};
+use engram_llm::chat::{ChatMessage, ChatRequest};
 use engram_runtime::{
     ConstructiveKnowledge, IngestionOutcome, MemorySystem, RetrievalOutcome, RuntimeConfig,
     SessionHandle,

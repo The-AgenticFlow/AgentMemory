@@ -1,5 +1,5 @@
 ["package"]
-name = "engram-qwen"
+name = "engram-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

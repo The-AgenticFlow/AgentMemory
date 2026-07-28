@@ -17,6 +17,7 @@ services:
       LLM_MODEL: ${LLM_MODEL}
       LLM_CHAT_PATH: ${LLM_CHAT_PATH}
       LLM_EMBEDDINGS_PATH: ${LLM_EMBEDDINGS_PATH}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-text-embedding-3-small}
       LLM_RERANK_ENDPOINT: ${LLM_RERANK_ENDPOINT}
       ENGRAM_DASHSCOPE_API_KEY: ${ENGRAM_DASHSCOPE_API_KEY}
       ENGRAM_REQUIRE_LLM: ${ENGRAM_REQUIRE_LLM}
@@ -93,6 +94,33 @@ services:
     depends_on:
       - loki
 
+  grafana:
+    image: grafana/grafana:10.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-engram-dev}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_SERVER_DOMAIN: "0.0.0.0"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_SECURITY_COOKIE_SRS_SAME_SITE_POLICY: "disabled"
+    volumes:
+      - ./grafana-provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - engram-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   engram-net:
     driver: bridge
@@ -102,3 +130,4 @@ volumes:
   engram-neo4j-data:
   engram-neo4j-logs:
   loki-data:
+  grafana-data:

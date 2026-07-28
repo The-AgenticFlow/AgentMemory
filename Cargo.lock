@@ -371,7 +371,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "engram-qwen"
+name = "engram-llm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -392,7 +392,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "engram-core",
- "engram-qwen",
+ "engram-llm",
  "engram-store",
  "lazy_static",
  "serde",
@@ -411,7 +411,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "engram-core",
- "engram-qwen",
+ "engram-llm",
  "engram-runtime",
  "engram-store",
  "futures-util",

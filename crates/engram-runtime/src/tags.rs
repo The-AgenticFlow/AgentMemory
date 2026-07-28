@@ -14,7 +14,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use engram_core::EngramEntry;
-use engram_qwen::{
+use engram_llm::{
     DashScopeClient,
     chat::{ChatMessage, ChatRequest},
 };
@@ -627,8 +627,9 @@ pub async fn refine_tags_with_llm(
 
     let existing_tags = engram.tags.join(", ");
 
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-max".to_string());
     let request = ChatRequest::new(
-        "qwen-max",
+        model,
         vec![
             ChatMessage {
                 role: "system".to_string(),

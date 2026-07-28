@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
-use engram_qwen::DashScopeClient;
-use engram_qwen::chat::{ChatMessage, ChatRequest};
+use engram_llm::DashScopeClient;
+use engram_llm::chat::{ChatMessage, ChatRequest};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
 
@@ -432,8 +432,9 @@ async fn extract_schema_fields(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-max".to_string());
     let request = ChatRequest::new(
-        "qwen-max",
+        model,
         vec![
             ChatMessage {
                 role: "system".to_string(),

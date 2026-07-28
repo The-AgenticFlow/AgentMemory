@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use engram_qwen::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
+use engram_llm::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
 use engram_server::{
     AppState, build_app, mcp,
     routes::{LogBuffer, LogCaptureLayer},

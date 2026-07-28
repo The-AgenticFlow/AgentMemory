@@ -4,9 +4,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::routing::{delete, get, post, put};
-use axum::{Json, Router};
+use axum::{Json, Router, response::IntoResponse};
 use engram_core::{
     BankType, DispositionConfig, Episode, MemoryBank, RetrievalState, Session, SessionMode,
     WorkingContext,
@@ -409,17 +409,28 @@ fn default_limit() -> usize {
 pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
-) -> impl axum::response::IntoResponse {
+) -> impl IntoResponse {
     let logs = state
         .log_buffer
         .get_recent(query.limit.min(MAX_LOG_ENTRIES))
         .await;
 
     if query.format == "json" {
-        let json = serde_json::to_string_pretty(&logs).unwrap_or_default();
-        axum::response::Html(format!("<pre>{}</pre>", json))
+        let body = serde_json::to_string_pretty(&logs).unwrap_or_default();
+        IntoResponse::into_response(
+            axum::response::Response::builder()
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
     } else {
-        axum::response::Html(format_colored_logs(&logs))
+        let body = format_colored_logs(&logs);
+        IntoResponse::into_response(
+            axum::response::Response::builder()
+                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
     }
 }
 

@@ -413,7 +413,7 @@ pub async fn get_logs(
         let entries = state.log_buffer.entries.lock().unwrap();
         entries.len()
     };
-    tracing::info!("[get_logs] buffer has {} entries, limit={}", log_count, query.limit);
+    tracing::info!("[get_logs] GET /logs called - buffer has {} entries, limit={}", log_count, query.limit);
     
     Json(state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await)
 }

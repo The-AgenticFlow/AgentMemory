@@ -409,26 +409,13 @@ pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
 ) -> Json<Vec<LogEntry>> {
-    tracing::info!("GET /logs - loki_url: {:?}", state.loki_url);
-
-    if let Some(loki_url) = &state.loki_url {
-        match query_loki(&state.loki_client, loki_url, query.limit.min(MAX_LOG_ENTRIES)).await {
-            Ok(logs) => {
-                tracing::info!("Returning {} logs from Loki", logs.len());
-                return Json(logs);
-            }
-            Err(e) => {
-                tracing::warn!("Loki query failed, falling back to buffer: {}", e);
-            }
-        }
-    }
-
-    let logs = state
-        .log_buffer
-        .get_recent(query.limit.min(MAX_LOG_ENTRIES))
-        .await;
-    tracing::info!("Returning {} logs from buffer", logs.len());
-    Json(logs)
+    let log_count = {
+        let entries = state.log_buffer.entries.lock().unwrap();
+        entries.len()
+    };
+    tracing::info!("[get_logs] buffer has {} entries, limit={}", log_count, query.limit);
+    
+    Json(state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await)
 }
 
 async fn query_loki(client: &Client, loki_url: &str, limit: usize) -> anyhow::Result<Vec<LogEntry>> {

@@ -409,17 +409,17 @@ fn default_limit() -> usize {
 pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
-) -> Result<String, (StatusCode, String)> {
+) -> impl axum::response::IntoResponse {
     let logs = state
         .log_buffer
         .get_recent(query.limit.min(MAX_LOG_ENTRIES))
         .await;
 
-    if query.format == "text" || query.format.is_empty() {
-        let colored_output = format_colored_logs(&logs);
-        Ok(colored_output)
+    if query.format == "json" {
+        let json = serde_json::to_string_pretty(&logs).unwrap_or_default();
+        axum::response::Html(format!("<pre>{}</pre>", json))
     } else {
-        Ok(serde_json::to_string_pretty(&logs).unwrap_or_default())
+        axum::response::Html(format_colored_logs(&logs))
     }
 }
 

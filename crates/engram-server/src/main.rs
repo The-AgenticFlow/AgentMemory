@@ -17,6 +17,8 @@ async fn main() -> anyhow::Result<()> {
     let log_buffer = LogBuffer::new();
     init_tracing(log_buffer.clone());
     tracing::info!("engram-server tracing initialized");
+    tracing::warn!("[CRITICAL] engram-server STARTING with /logs support - if you see this, the new code is running!");
+    tracing::warn!("[CRITICAL] Build time: {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
 
     if std::env::args().nth(1).as_deref() == Some("mcp-stdio") {
         let state = app_state_from_env(log_buffer).await?;

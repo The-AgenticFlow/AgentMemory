@@ -185,13 +185,10 @@ impl AppState {
 }
 
 pub fn router(state: AppState) -> Router {
-    tracing::warn!("[STARTUP] Creating router with /logs and /logstest routes");
     Router::new()
         .route("/health", get(health))
         .route("/logs", get(get_logs))
         .route("/logstest", axum::routing::get(|| async { "LOGS_ENDPOINT_WORKING" }))
-        .with_state(state)
-}
         .route("/mcp", post(crate::mcp::mcp_http))
         .route("/control/overview", get(control_overview))
         .route("/control/graph", get(control_graph))
@@ -413,15 +410,11 @@ pub async fn get_logs(
     State(state): State<AppState>,
     Query(query): Query<LogsQuery>,
 ) -> Json<Vec<LogEntry>> {
-    let path = "/logs";
-    tracing::info!("[STARTUP] Route {} registered - handler = get_logs", path);
-    tracing::warn!("[get_logs] GET /logs called at startup - this log proves code is executing!");
-    
     let log_count = {
         let entries = state.log_buffer.entries.lock().unwrap();
         entries.len()
     };
-    tracing::info!("[get_logs] buffer has {} entries, limit={}", log_count, query.limit);
+    tracing::info!("[get_logs] GET /logs called - buffer has {} entries, limit={}", log_count, query.limit);
     
     Json(state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await)
 }

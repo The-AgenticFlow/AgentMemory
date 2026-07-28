@@ -20,6 +20,7 @@ services:
       LLM_RERANK_ENDPOINT: ${LLM_RERANK_ENDPOINT}
       ENGRAM_DASHSCOPE_API_KEY: ${ENGRAM_DASHSCOPE_API_KEY}
       ENGRAM_REQUIRE_LLM: ${ENGRAM_REQUIRE_LLM}
+      ENGRAM_LOKI_URL: http://loki:3100
       RUST_LOG: info
     restart: unless-stopped
     depends_on:
@@ -33,6 +34,11 @@ services:
       start_period: 30s
     networks:
       - engram-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   neo4j:
     image: neo4j:5.26-community
@@ -55,6 +61,37 @@ services:
     restart: unless-stopped
     networks:
       - engram-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  loki:
+    image: grafana/loki:2.9.0
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - engram-net
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+    restart: unless-stopped
+    networks:
+      - engram-net
+    depends_on:
+      - loki
 
 networks:
   engram-net:
@@ -64,3 +101,4 @@ volumes:
   engram-data:
   engram-neo4j-data:
   engram-neo4j-logs:
+  loki-data:

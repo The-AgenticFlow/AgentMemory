@@ -127,37 +127,37 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
 - name: Deploy to server
-        env:
-          REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          SHA: ${{ github.sha }}
-          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
-          SSH_USER: ${{ secrets.DEPLOY_USER }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_CHAT_PATH: ${{ secrets.LLM_CHAT_PATH }}
-          LLM_EMBEDDINGS_PATH: ${{ secrets.LLM_EMBEDDINGS_PATH }}
-          LLM_EMBEDDING_MODEL: ${{ secrets.LLM_EMBEDDING_MODEL }}
-          LLM_RERANK_ENDPOINT: ${{ secrets.LLM_RERANK_ENDPOINT }}
-          ENGRAM_DASHSCOPE_API_KEY: ${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}
-          ENGRAM_REQUIRE_LLM: ${{ secrets.ENGRAM_REQUIRE_LLM }}
-          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
-        run: |
-          IMAGE_NAME_LOWER="${IMAGE_NAME,,}"
-          IMAGE="$REGISTRY/$IMAGE_NAME_LOWER:$SHA"
+          env:
+            REGISTRY: ${{ env.REGISTRY }}
+            IMAGE_NAME: ${{ env.IMAGE_NAME }}
+            SHA: ${{ github.sha }}
+            SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+            SSH_USER: ${{ secrets.DEPLOY_USER }}
+            LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+            LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+            LLM_MODEL: ${{ secrets.LLM_MODEL }}
+            LLM_CHAT_PATH: ${{ secrets.LLM_CHAT_PATH }}
+            LLM_EMBEDDINGS_PATH: ${{ secrets.LLM_EMBEDDINGS_PATH }}
+            LLM_EMBEDDING_MODEL: ${{ secrets.LLM_EMBEDDING_MODEL }}
+            LLM_RERANK_ENDPOINT: ${{ secrets.LLM_RERANK_ENDPOINT }}
+            ENGRAM_DASHSCOPE_API_KEY: ${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}
+            ENGRAM_REQUIRE_LLM: ${{ secrets.ENGRAM_REQUIRE_LLM }}
+            GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          run: |
+            IMAGE_NAME_LOWER="${IMAGE_NAME,,}"
+            IMAGE="$REGISTRY/$IMAGE_NAME_LOWER:$SHA"
           
           echo "Creating deployment directory..."
-          ssh "$SSH_USER@$SSH_HOST" "mkdir -p /home/$SSH_USER/engram && chmod 755 /home/$SSH_USER/engram"
-          
-          echo "Logging into GitHub Container Registry..."
-          echo "${{ github.token }}" | ssh "$SSH_USER@$SSH_HOST" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
-          
-          # Upload deploy.sh to server
-          scp deploy.sh "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/deploy.sh"
-          
-          # Upload .env file with all LLM settings
-          cat > .env << 'ENVFILE'
+            ssh "$SSH_USER@$SSH_HOST" "mkdir -p /home/$SSH_USER/engram && chmod 755 /home/$SSH_USER/engram"
+            
+            echo "Logging into GitHub Container Registry..."
+            echo "${{ github.token }}" | ssh "$SSH_USER@$SSH_HOST" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+            
+            # Upload deploy.sh to server
+            scp deploy.sh "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/deploy.sh"
+            
+            # Upload .env file with all LLM settings
+            cat > .env << 'ENVFILE'
 LLM_ENDPOINT=$LLM_ENDPOINT
 LLM_API_KEY=$LLM_API_KEY
 LLM_MODEL=$LLM_MODEL
@@ -169,10 +169,10 @@ ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY
 ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM
 GRAFANA_PASSWORD=$GRAFANA_PASSWORD
 ENVFILE
-          scp .env "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/.env"
-          
-          # Run deployment
-          ssh "$SSH_USER@$SSH_HOST" "cd /home/$SSH_USER/engram && bash deploy.sh '$SSH_USER' '$SSH_HOST' '$IMAGE'"
+            scp .env "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/.env"
+            
+            # Run deployment
+            ssh "$SSH_USER@$SSH_HOST" "cd /home/$SSH_USER/engram && bash deploy.sh '$SSH_USER' '$SSH_HOST' '$IMAGE'"
 
   notify-deployment:
     runs-on: ubuntu-latest

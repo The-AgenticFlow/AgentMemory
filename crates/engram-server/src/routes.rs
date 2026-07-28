@@ -188,6 +188,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/logs", get(get_logs))
+        .route("/logs-new-route", get(get_logs))
         .route("/mcp", post(crate::mcp::mcp_http))
         .route("/control/overview", get(control_overview))
         .route("/control/graph", get(control_graph))

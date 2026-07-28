@@ -126,124 +126,53 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Create deployment script
+- name: Deploy to server
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           SHA: ${{ github.sha }}
           SSH_HOST: ${{ secrets.DEPLOY_HOST }}
           SSH_USER: ${{ secrets.DEPLOY_USER }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_CHAT_PATH: ${{ secrets.LLM_CHAT_PATH }}
+          LLM_EMBEDDINGS_PATH: ${{ secrets.LLM_EMBEDDINGS_PATH }}
+          LLM_EMBEDDING_MODEL: ${{ secrets.LLM_EMBEDDING_MODEL }}
+          LLM_RERANK_ENDPOINT: ${{ secrets.LLM_RERANK_ENDPOINT }}
+          ENGRAM_DASHSCOPE_API_KEY: ${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}
+          ENGRAM_REQUIRE_LLM: ${{ secrets.ENGRAM_REQUIRE_LLM }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
         run: |
-          # Lowercase the repository name for Docker compatibility
           IMAGE_NAME_LOWER="${IMAGE_NAME,,}"
           IMAGE="$REGISTRY/$IMAGE_NAME_LOWER:$SHA"
           
-          # Write deployment script file by file
-          {
-            echo "#!/bin/bash"
-            echo "set -e"
-            echo ""
-            echo "IMAGE=\"$IMAGE\""
-            echo "DEPLOY_DIR=\"/home/\$SSH_USER/engram\""
-            echo "SSH_HOST=\"\$SSH_HOST\""
-            echo "SSH_USER=\"\$SSH_USER\""
-            echo ''
-            echo 'echo "=== Deployment Configuration ==="'
-            echo 'echo "Image: $IMAGE"'
-            echo 'echo "Deploy directory: $DEPLOY_DIR"'
-            echo 'echo "SSH Host: $SSH_HOST"'
-            echo ''
-            echo 'mkdir -p "$DEPLOY_DIR"'
-            echo ''
-            echo '# Create fresh .env file if it does not exist'
-            echo 'ENV_FILE="$DEPLOY_DIR/.env"'
-            echo 'if [[ ! -f "$ENV_FILE" ]]; then'
-            echo '  echo "Creating fresh .env file..."'
-            echo '  cat > "$ENV_FILE" << '"'"'ENV_TEMPLATE'"'"''
-            echo 'LLM_ENDPOINT=$LLM_ENDPOINT'
-            echo 'LLM_API_KEY=$LLM_API_KEY'
-            echo 'LLM_MODEL=$LLM_MODEL'
-            echo 'LLM_CHAT_PATH=$LLM_CHAT_PATH'
-            echo 'LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH'
-            echo 'LLM_EMBEDDING_MODEL=$LLM_EMBEDDING_MODEL'
-            echo 'LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT'
-            echo 'ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY'
-            echo 'ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM'
-            echo 'GRAFANA_PASSWORD=$GRAFANA_PASSWORD'
-            echo 'ENV_TEMPLATE'
-            echo 'else'
-            echo '  echo "Updating existing .env file..."'
-            echo '  # Backup existing .env'
-            echo '  cp "$ENV_FILE" "$ENV_FILE.bak"'
-            echo '  # Update LLM vars only'
-            echo '  grep -v "^LLM_" "$ENV_FILE" | grep -v "^GRAFANA_" > "$ENV_FILE.new"'
-            echo '  echo "LLM_ENDPOINT=$LLM_ENDPOINT" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_API_KEY=$LLM_API_KEY" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_MODEL=$LLM_MODEL" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_CHAT_PATH=$LLM_CHAT_PATH" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_EMBEDDING_MODEL=$LLM_EMBEDDING_MODEL" >> "$ENV_FILE.new"'
-            echo '  echo "LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT" >> "$ENV_FILE.new"'
-            echo '  echo "ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY" >> "$ENV_FILE.new"'
-            echo '  echo "ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM" >> "$ENV_FILE.new"'
-            echo '  echo "GRAFANA_PASSWORD=$GRAFANA_PASSWORD" >> "$ENV_FILE.new"'
-            echo '  mv "$ENV_FILE.new" "$ENV_FILE"'
-            echo 'fi'
-            echo ''
-            echo 'echo "Stopping existing containers..."'
-            echo "ssh \$SSH_USER@\$SSH_HOST \"docker stop \$(docker ps -aq) 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"docker rm \$(docker ps -aq) 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"cd \$DEPLOY_DIR \\&\\& docker compose down --remove-orphans 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"fuser -k 7474/tcp 7687/tcp 2>/dev/null || lsof -t -i :7474 -i :7687 | xargs -r kill -9 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sleep 5\""
-            echo ''
-            echo 'echo "Backing up data..."'
-            echo 'TIMESTAMP=$(date +%Y%m%d_%H%M%S)'
-            echo 'ssh $SSH_USER@$SSH_HOST "cp -r $DEPLOY_DIR/data /tmp/engram_data_backup_$TIMESTAMP 2>/dev/null || true"'
-            echo ''
-            echo 'echo "Transferring files..."'
-            echo 'tar --exclude=.git --exclude=.agents --exclude=target --exclude=web/node_modules --exclude=web/dist -czf - . | ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && tar -xzf -"'
-            echo ''
-            echo 'echo "Pulling and tagging Docker image..."'
-            echo 'ssh $SSH_USER@$SSH_HOST "docker pull $IMAGE && docker tag $IMAGE engram-agent:latest"'
-            echo ''
-            echo 'echo "Starting containers..."'
-            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans --force-recreate"'
-            echo ''
-            echo 'echo "Waiting 60 seconds for services to start..."'
-            echo 'sleep 60'
-            echo ''
-            echo 'echo "Verifying services..."'
-            echo 'ssh $SSH_USER@$SSH_HOST "curl -sf http://localhost:7474 || echo Neo4j not ready yet"'
-            echo 'ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || echo Engram not ready yet"'
-            echo 'ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3000 || echo Grafana not ready yet"'
-            echo ''
-            echo 'ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"'
-            echo 'echo "=== Deployment complete ==="'
-          } > deploy.sh
-          chmod +x deploy.sh
-          cat deploy.sh | head -30
-
-      - name: Deploy to server
-        run: |
-          echo "Creating deployment directory: /home/$USER/engram..."
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram"
+          echo "Creating deployment directory..."
+          ssh "$SSH_USER@$SSH_HOST" "mkdir -p /home/$SSH_USER/engram && chmod 755 /home/$SSH_USER/engram"
           
           echo "Logging into GitHub Container Registry..."
-          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+          echo "${{ github.token }}" | ssh "$SSH_USER@$SSH_HOST" "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
           
-          export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
-          export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'
-          export LLM_MODEL='${{ secrets.LLM_MODEL }}'
-          export LLM_CHAT_PATH='${{ secrets.LLM_CHAT_PATH }}'
-          export LLM_EMBEDDINGS_PATH='${{ secrets.LLM_EMBEDDINGS_PATH }}'
-          export LLM_EMBEDDING_MODEL='${{ secrets.LLM_EMBEDDING_MODEL }}'
-          export LLM_RERANK_ENDPOINT='${{ secrets.LLM_RERANK_ENDPOINT }}'
-          export ENGRAM_DASHSCOPE_API_KEY='${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}'
-          export ENGRAM_REQUIRE_LLM='${{ secrets.ENGRAM_REQUIRE_LLM }}'
-          export GRAFANA_PASSWORD='${{ secrets.GRAFANA_PASSWORD }}'
+          # Upload deploy.sh to server
+          scp deploy.sh "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/deploy.sh"
           
-          ./deploy.sh
+          # Upload .env file with all LLM settings
+          cat > .env << 'ENVFILE'
+LLM_ENDPOINT=$LLM_ENDPOINT
+LLM_API_KEY=$LLM_API_KEY
+LLM_MODEL=$LLM_MODEL
+LLM_CHAT_PATH=$LLM_CHAT_PATH
+LLM_EMBEDDINGS_PATH=$LLM_EMBEDDINGS_PATH
+LLM_EMBEDDING_MODEL=$LLM_EMBEDDING_MODEL
+LLM_RERANK_ENDPOINT=$LLM_RERANK_ENDPOINT
+ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY
+ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM
+GRAFANA_PASSWORD=$GRAFANA_PASSWORD
+ENVFILE
+          scp .env "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/.env"
+          
+          # Run deployment
+          ssh "$SSH_USER@$SSH_HOST" "cd /home/$SSH_USER/engram && bash deploy.sh '$SSH_USER' '$SSH_HOST' '$IMAGE'"
 
   notify-deployment:
     runs-on: ubuntu-latest

@@ -30,7 +30,10 @@ pub fn build_app(state: AppState) -> Router {
         )
         .layer(middleware::from_fn(api_token_auth))
         .layer(cors_layer());
-    tracing::warn!("[CRITICAL] Router built with fallback_service for web_root={}", web_root);
+    tracing::warn!(
+        "[CRITICAL] Router built with fallback_service for web_root={}",
+        web_root
+    );
     app
 }
 

@@ -17,7 +17,6 @@ use engram_runtime::{
     SessionHandle,
 };
 use futures_util::StreamExt;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::Subscriber;
@@ -157,8 +156,6 @@ pub struct AppState {
     pub system: MemorySystem,
     pub sessions: Arc<RwLock<HashMap<Uuid, SessionHandle>>>,
     pub log_buffer: LogBuffer,
-    pub loki_url: Option<String>,
-    pub loki_client: Client,
 }
 
 impl Default for AppState {
@@ -174,8 +171,6 @@ impl AppState {
             system: MemorySystem::new(),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             log_buffer,
-            loki_url: std::env::var("ENGRAM_LOKI_URL").ok(),
-            loki_client: Client::new(),
         }
     }
 
@@ -187,7 +182,10 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/logstest123", axum::routing::get(|| async { "ROUTE_WORKS_V1" }))
+        .route(
+            "/logstest123",
+            axum::routing::get(|| async { "ROUTE_WORKS_V1" }),
+        )
         .route("/logs", get(get_logs))
         .route("/mcp", post(crate::mcp::mcp_http))
         .route("/control/overview", get(control_overview))
@@ -414,94 +412,18 @@ pub async fn get_logs(
         let entries = state.log_buffer.entries.lock().unwrap();
         entries.len()
     };
-    tracing::info!("[get_logs] GET /logs called - buffer has {} entries, limit={}", log_count, query.limit);
-    
-    // Return a test response that proves the route works
-    let test_response = serde_json::json!({
-        "route": "/logs",
-        "working": true,
-        "buffer_entries": log_count,
-        "limit": query.limit
-    });
-    
-    Json(state.log_buffer.get_recent(query.limit.min(MAX_LOG_ENTRIES)).await)
-}
+    tracing::info!(
+        "[get_logs] GET /logs called - buffer has {} entries, limit={}",
+        log_count,
+        query.limit
+    );
 
-async fn query_loki(client: &Client, loki_url: &str, limit: usize) -> anyhow::Result<Vec<LogEntry>> {
-    use serde::Serialize;
-
-    #[derive(Serialize)]
-    struct LokiQuery {
-        query: String,
-        limit: usize,
-        direction: String,
-    }
-
-    let params = LokiQuery {
-        query: "{job=~\"docker|flog\"}".to_string(),
-        limit,
-        direction: "backward".to_string(),
-    };
-
-    let url = format!("{}/loki/api/v1/query", loki_url.trim_end_matches('/'));
-    let response = client
-        .get(&url)
-        .query(&params)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let body = response.text().await?;
-        anyhow::bail!("Loki API error: {}", body);
-    }
-
-    #[derive(Deserialize)]
-    struct LokiResponse {
-        data: LokiData,
-    }
-
-    #[derive(Deserialize)]
-    struct LokiData {
-        result: Vec<LokiStream>,
-    }
-
-    #[derive(Deserialize)]
-    struct LokiStream {
-        values: Vec<(String, String)>,
-    }
-
-    let loki_resp: LokiResponse = response.json().await?;
-
-    let mut logs: Vec<LogEntry> = Vec::new();
-    for stream in loki_resp.data.result {
-        for (ts_str, msg) in stream.values {
-            let timestamp = ts_str.parse::<i64>().unwrap_or(0) / 1_000_000_000;
-            logs.push(LogEntry {
-                timestamp: timestamp as u64,
-                level: parse_log_level(&msg),
-                target: "docker".to_string(),
-                message: msg,
-                fields: serde_json::json!({}),
-            });
-        }
-    }
-
-    logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    logs.truncate(limit);
-    Ok(logs)
-}
-
-fn parse_log_level(msg: &str) -> String {
-    let lower = msg.to_lowercase();
-    if lower.contains("error") || lower.contains("err]") {
-        "ERROR".to_string()
-    } else if lower.contains("warn") || lower.contains("warning") {
-        "WARN".to_string()
-    } else if lower.contains("debug") {
-        "DEBUG".to_string()
-    } else {
-        "INFO".to_string()
-    }
+    Json(
+        state
+            .log_buffer
+            .get_recent(query.limit.min(MAX_LOG_ENTRIES))
+            .await,
+    )
 }
 
 #[cfg(test)]
@@ -530,13 +452,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_logs_route_returns_json_entries() {
-        use reqwest::Client;
         let state = AppState {
             system: MemorySystem::new(),
             sessions: Arc::new(RwLock::new(HashMap::new())),
             log_buffer: LogBuffer::new(),
-            loki_url: None,
-            loki_client: Client::new(),
         };
         state.log_buffer.add(LogEntry {
             timestamp: 2,

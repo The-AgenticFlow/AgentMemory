@@ -191,11 +191,11 @@ jobs:
             echo 'fi'
             echo ''
             echo 'echo "Stopping existing containers..."'
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo docker stop \$(sudo docker ps -aq) 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo docker rm \$(sudo docker ps -aq) 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"cd \$DEPLOY_DIR \\&\\& sudo docker compose down --remove-orphans 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo fuser -k 7474/tcp 7687/tcp 2>/dev/null || sudo lsof -t -i :7474 -i :7687 | xargs -r kill -9 2>/dev/null || true\""
-            echo "ssh \$SSH_USER@\$SSH_HOST \"sudo sleep 5\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"docker stop \$(docker ps -aq) 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"docker rm \$(docker ps -aq) 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"cd \$DEPLOY_DIR \\&\\& docker compose down --remove-orphans 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"fuser -k 7474/tcp 7687/tcp 2>/dev/null || lsof -t -i :7474 -i :7687 | xargs -r kill -9 2>/dev/null || true\""
+            echo "ssh \$SSH_USER@\$SSH_HOST \"sleep 5\""
             echo ''
             echo 'echo "Backing up data..."'
             echo 'TIMESTAMP=$(date +%Y%m%d_%H%M%S)'
@@ -205,10 +205,10 @@ jobs:
             echo 'tar --exclude=.git --exclude=.agents --exclude=target --exclude=web/node_modules --exclude=web/dist -czf - . | ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && tar -xzf -"'
             echo ''
             echo 'echo "Pulling and tagging Docker image..."'
-            echo 'ssh $SSH_USER@$SSH_HOST "sudo docker pull $IMAGE && sudo docker tag $IMAGE engram-agent:latest"'
+            echo 'ssh $SSH_USER@$SSH_HOST "docker pull $IMAGE && docker tag $IMAGE engram-agent:latest"'
             echo ''
             echo 'echo "Starting containers..."'
-            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && sudo docker compose up -d --remove-orphans --force-recreate"'
+            echo 'ssh $SSH_USER@$SSH_HOST "cd $DEPLOY_DIR && docker compose up -d --remove-orphans --force-recreate"'
             echo ''
             echo 'echo "Waiting 60 seconds for services to start..."'
             echo 'sleep 60'
@@ -218,7 +218,7 @@ jobs:
             echo 'ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3001/health || echo Engram not ready yet"'
             echo 'ssh $SSH_USER@$SSH_HOST "curl -f http://localhost:3000 || echo Grafana not ready yet"'
             echo ''
-            echo 'ssh $SSH_USER@$SSH_HOST "sudo docker image prune -f 2>/dev/null || true"'
+            echo 'ssh $SSH_USER@$SSH_HOST "docker image prune -f 2>/dev/null || true"'
             echo 'echo "=== Deployment complete ==="'
           } > deploy.sh
           chmod +x deploy.sh
@@ -230,7 +230,7 @@ jobs:
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "mkdir -p /home/${{ secrets.DEPLOY_USER }}/engram && chmod 755 /home/${{ secrets.DEPLOY_USER }}/engram"
           
           echo "Logging into GitHub Container Registry..."
-          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+          echo "${{ github.token }}" | ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "docker login ghcr.io -u ${{ github.actor }} --password-stdin"
           
           export LLM_ENDPOINT='${{ secrets.LLM_ENDPOINT }}'
           export LLM_API_KEY='${{ secrets.LLM_API_KEY }}'

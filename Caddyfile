@@ -2,7 +2,7 @@
 	redir https://{host}{uri} permanent
 }
 
-{$ENGRAM_DOMAIN::443} {
+:443 {
 	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
 
 	reverse_proxy engram:3001

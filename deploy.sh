@@ -44,7 +44,7 @@ echo "Verifying services..."
 docker compose exec -T neo4j wget -qO- --tries=1 http://localhost:7474 >/dev/null 2>&1 \
   && echo "Neo4j OK" || echo "Neo4j not ready yet"
 curl -f http://localhost:3001/health || echo "Engram not ready yet"
-curl -f http://localhost:3000 || echo "Grafana not ready yet"
+curl -fk https://localhost/grafana/login -o /dev/null && echo "Grafana OK" || echo "Grafana not ready yet"
 curl -sfk https://localhost -o /dev/null && echo "Caddy OK" || echo "Caddy not ready yet (check caddy/certs/origin*.pem exist on the server)"
 echo "Recent engram logs (for quick debugging):"
 docker compose logs --tail=40 engram || true

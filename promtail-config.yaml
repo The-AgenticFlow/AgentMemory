@@ -10,12 +10,36 @@ clients:
 
 scrape_configs:
   - job_name: docker
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: docker
-          __path__: /var/lib/docker/containers/*/*-json.log
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: "container"
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: "stream"
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: "job"
+        replacement: "docker"
+    pipeline_stages:
+      # Docker's json-file driver wraps every line as {"log":"...","stream":"stdout","time":"..."}
+      - json:
+          expressions:
+            output: log
+            time: time
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      # tracing_subscriber's default fmt layer prints e.g. "2024-01-01T00:00:00Z  INFO engram_server: ..."
+      - regex:
+          expression: '.*\s(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s'
+          source: output
+      - labels:
+          level:
+      - output:
+          source: output
 
   - job_name: systemd
     static_configs:

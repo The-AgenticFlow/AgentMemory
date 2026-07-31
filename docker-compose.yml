@@ -1,4 +1,27 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      ENGRAM_DOMAIN: ${ENGRAM_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - engram
+    restart: unless-stopped
+    networks:
+      - engram-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   engram:
     image: engram-agent:latest
     env_file:
@@ -6,7 +29,7 @@ services:
     environment:
       ENGRAM_SERVER_ADDR: 0.0.0.0:3001
       ENGRAM_DATA_DIR: /data
-      ENGRAM_NEO4J_URI: bolt://neo4j:7687
+      ENGRAM_NEO4J_URI: http://neo4j:7474
       ENGRAM_NEO4J_USER: neo4j
       ENGRAM_NEO4J_PASSWORD: engram-memory
       ENGRAM_NEO4J_DATABASE: neo4j
@@ -35,6 +58,8 @@ services:
       start_period: 30s
     ports:
       - "3001:3001"
+    volumes:
+      - engram-data:/data
     networks:
       - engram-net
     logging:
@@ -88,6 +113,7 @@ services:
     volumes:
       - ./promtail-config.yaml:/etc/promtail/config.yaml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log/journal:/var/log/journal:ro
       - /run/log/journal:/run/log/journal:ro
     restart: unless-stopped
@@ -133,3 +159,5 @@ volumes:
   engram-neo4j-logs:
   loki-data:
   grafana-data:
+  caddy-data:
+  caddy-config:

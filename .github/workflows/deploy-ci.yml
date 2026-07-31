@@ -126,6 +126,44 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
+      - name: Bootstrap Docker on host (idempotent, no manual SSH needed)
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" 'bash -s' <<'REMOTE_SCRIPT'
+          set -e
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Docker not found on host, installing..."
+            . /etc/os-release 2>/dev/null || true
+            case "${ID:-unknown}" in
+              amzn)
+                sudo dnf install -y docker 2>/dev/null || sudo yum install -y docker
+                sudo systemctl enable --now docker
+                ;;
+              *)
+                curl -fsSL https://get.docker.com | sudo sh
+                sudo systemctl enable --now docker
+                ;;
+            esac
+            sudo usermod -aG docker "$(whoami)"
+          else
+            echo "Docker already present: $(docker --version)"
+            sudo systemctl enable --now docker 2>/dev/null || true
+          fi
+
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "docker compose plugin missing, installing..."
+            sudo mkdir -p /usr/local/lib/docker/cli-plugins
+            sudo curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+              -o /usr/local/lib/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          fi
+
+          docker --version
+          docker compose version
+          REMOTE_SCRIPT
+
       - name: Deploy to server
         env:
           REGISTRY: ${{ env.REGISTRY }}
@@ -143,6 +181,7 @@ jobs:
           ENGRAM_DASHSCOPE_API_KEY: ${{ secrets.ENGRAM_DASHSCOPE_API_KEY }}
           ENGRAM_REQUIRE_LLM: ${{ secrets.ENGRAM_REQUIRE_LLM }}
           GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+          ENGRAM_DOMAIN: ${{ secrets.ENGRAM_DOMAIN }}
         run: |
           IMAGE_NAME_LOWER="${IMAGE_NAME,,}"
           IMAGE="$REGISTRY/$IMAGE_NAME_LOWER:$SHA"
@@ -169,6 +208,7 @@ jobs:
             echo "ENGRAM_DASHSCOPE_API_KEY=$ENGRAM_DASHSCOPE_API_KEY"
             echo "ENGRAM_REQUIRE_LLM=$ENGRAM_REQUIRE_LLM"
             echo "GRAFANA_PASSWORD=$GRAFANA_PASSWORD"
+            echo "ENGRAM_DOMAIN=$ENGRAM_DOMAIN"
           } > .env
           scp .env "$SSH_USER@$SSH_HOST:/home/$SSH_USER/engram/.env"
 

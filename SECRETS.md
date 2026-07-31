@@ -46,6 +46,29 @@ LLM_RERANK_ENDPOINT=https://api.example.com/rerank      # Optional
 ENGRAM_REQUIRE_LLM=false                                # Optional
 ```
 
+## Caddy (HTTPS reverse proxy)
+
+Caddy runs as a container (`caddy` service in `docker-compose.yml`) and terminates TLS in
+front of `engram`, using the `Caddyfile` at the repo root.
+
+```
+ENGRAM_DOMAIN=engram.example.com   # GitHub secret, optional (defaults to "localhost")
+```
+
+**Certificates are NOT managed via GitHub Secrets or git.** `caddy/certs/` is gitignored and
+excluded from the deploy file transfer, so whatever you place there on the server persists
+across deploys. One-time setup on the server:
+
+```bash
+mkdir -p ~/engram/caddy/certs
+# Copy your real origin cert + key here (e.g. a Cloudflare Origin CA certificate pair):
+#   ~/engram/caddy/certs/origin.pem
+#   ~/engram/caddy/certs/origin-key.pem
+```
+
+If these files are missing, the `caddy` container will fail to start (the other services are
+unaffected) — check with `docker compose logs caddy` on the server.
+
 ## Neo4j Configuration (Local .env only)
 
 ⚠️ **Neo4j configuration is NOT stored in GitHub Secrets**

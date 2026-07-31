@@ -20,7 +20,7 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": {"type": "loki", "uid": "grafanacloud-loki"},
+      "datasource": {"type": "loki", "uid": "loki"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
@@ -37,35 +37,48 @@
       "id": 1,
       "targets": [
         {
-          "datasource": {"type": "loki", "uid": "grafanacloud-loki"},
-          "expr": "rate({job=\"docker\"}[5m])",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "sum by (level) (rate({job=\"docker\", container=~\"$container\"}[5m]))",
           "legendFormat": "{{level}}",
           "refId": "A"
         }
       ],
-      "title": "Container Logs Rate",
+      "title": "Engram Logs Rate",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "loki", "uid": "grafanacloud-loki"},
+      "datasource": {"type": "loki", "uid": "loki"},
       "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
       "id": 2,
       "targets": [
         {
-          "datasource": {"type": "loki", "uid": "grafanacloud-loki"},
-          "expr": "{job=\"docker\"}",
+          "datasource": {"type": "loki", "uid": "loki"},
+          "expr": "{job=\"docker\", container=~\"$container\"}",
           "legendFormat": "",
           "refId": "A"
         }
       ],
-      "title": "Log Explorer",
+      "title": "Engram Log Explorer",
       "type": "logs"
     }
   ],
   "refresh": "5s",
   "schemaVersion": 38,
   "tags": ["engram", "logs"],
-  "templating": {"list": []},
+  "templating": {
+    "list": [
+      {
+        "name": "container",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "loki"},
+        "query": "label_values({job=\"docker\"}, container)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      }
+    ]
+  },
   "time": {"from": "now-1h", "to": "now"},
   "title": "Engram Logs Overview",
   "uid": "engram-logs",

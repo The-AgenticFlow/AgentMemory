@@ -126,6 +126,8 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-engram-dev}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: ${ENGRAM_DOMAIN:-localhost}
+      GF_SERVER_ROOT_URL: https://%(domain)s/grafana
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_SECURITY_COOKIE_SRS_SAME_SITE_POLICY: "disabled"

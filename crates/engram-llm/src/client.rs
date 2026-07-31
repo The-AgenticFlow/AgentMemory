@@ -39,16 +39,24 @@ impl LlmConfig {
 
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("LLM_API_KEY").unwrap_or_default();
-        let base_url = std::env::var("LLM_ENDPOINT").unwrap_or_else(|_| {
-            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/".to_string()
-        });
-        let chat_path =
-            std::env::var("LLM_CHAT_PATH").unwrap_or_else(|_| "chat/completions".to_string());
-        let embeddings_path =
-            std::env::var("LLM_EMBEDDINGS_PATH").unwrap_or_else(|_| "embeddings".to_string());
+        let base_url = std::env::var("LLM_ENDPOINT")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| {
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/".to_string()
+            });
+        let chat_path = std::env::var("LLM_CHAT_PATH")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "chat/completions".to_string());
+        let embeddings_path = std::env::var("LLM_EMBEDDINGS_PATH")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "embeddings".to_string());
 
         let rerank_base_url = std::env::var("LLM_RERANK_ENDPOINT")
             .ok()
+            .filter(|url| !url.trim().is_empty())
             .map(|url| Url::parse(&url).context("failed to parse rerank base URL"))
             .transpose()?;
 

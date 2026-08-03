@@ -5,6 +5,7 @@
 //! runtime only promotes experiences that are worth preserving.
 
 use engram_core::{EngramEntry, Episode, Session, SessionMode, ThalamusScores};
+use tracing::{info, warn};
 
 use crate::TaskRelevanceMode;
 use crate::config::ThalamusConfig;
@@ -134,12 +135,48 @@ impl ThalamusFilterNode {
             SessionMode::Validation => config.validation_threshold,
         };
 
-        ThalamusAssessment {
+        let assessment = ThalamusAssessment {
             accepted: score >= threshold,
             score,
             threshold,
             scores,
+        };
+
+        let action_snippet = &episode.action[..episode.action.len().min(60)];
+
+        if assessment.accepted {
+            info!(
+                episode_id = %episode.id,
+                session_id = %session.id,
+                mode = ?session.current_mode,
+                accepted = true,
+                score = assessment.score,
+                threshold = assessment.threshold,
+                novelty = assessment.scores.novelty,
+                surprise = assessment.scores.surprise,
+                task_relevance = assessment.scores.task_relevance,
+                valence = assessment.scores.emotional_valence,
+                action = %action_snippet,
+                "thalamus: episode ACCEPTED — promoting to buffer"
+            );
+        } else {
+            warn!(
+                episode_id = %episode.id,
+                session_id = %session.id,
+                mode = ?session.current_mode,
+                accepted = false,
+                score = assessment.score,
+                threshold = assessment.threshold,
+                novelty = assessment.scores.novelty,
+                surprise = assessment.scores.surprise,
+                task_relevance = assessment.scores.task_relevance,
+                valence = assessment.scores.emotional_valence,
+                action = %action_snippet,
+                "thalamus: episode REJECTED — below threshold"
+            );
         }
+
+        assessment
     }
 }
 

@@ -30,6 +30,17 @@ pub fn embed_text(text: &str) -> Vec<f32> {
         }
     }
 
+    let active_terms = normalized.split_whitespace().count();
+    tracing::trace!(
+        embedding_type = "local_hash",
+        text_chars = text.len(),
+        active_terms = active_terms,
+        dim = DEFAULT_EMBEDDING_DIM,
+        "embed_text: local hash embedding computed for {} chars / {} terms",
+        text.len(),
+        active_terms
+    );
+
     values
 }
 

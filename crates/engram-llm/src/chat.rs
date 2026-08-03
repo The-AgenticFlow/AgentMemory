@@ -40,5 +40,19 @@ pub struct ChatChoice {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatResponse {
+    pub id: Option<String>,
+    pub model: Option<String>,
+    pub usage: Option<Usage>,
+    #[serde(default)]
     pub choices: Vec<ChatChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Usage {
+    #[serde(rename = "prompt_tokens")]
+    pub prompt_tokens: Option<u32>,
+    #[serde(rename = "completion_tokens")]
+    pub completion_tokens: Option<u32>,
+    #[serde(rename = "total_tokens")]
+    pub total_tokens: Option<u32>,
 }

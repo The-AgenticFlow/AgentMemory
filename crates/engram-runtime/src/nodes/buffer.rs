@@ -15,6 +15,7 @@ use crate::tags::extract_tags;
 use engram_core::Episode;
 use engram_core::Session;
 use engram_store::QdrantMemoryStore;
+use tracing::info;
 
 /// Buffer node that accumulates repeated weak patterns.
 #[derive(Debug, Clone, Copy)]
@@ -97,6 +98,9 @@ impl BufferIngestNode {
             .find(|candidate| candidate.similarity >= self.similarity_threshold)
             .map(|candidate| candidate.item);
 
+        let is_merge = existing.is_some();
+        let tags_count = context_tags.len();
+
         let mut entry = match existing {
             Some(mut pattern) => {
                 let signal = plasticity.signal(
@@ -178,7 +182,27 @@ impl BufferIngestNode {
         if check_signal.high_plasticity {
             entry.strength = (entry.strength + 0.05).clamp(0.0, 1.0);
         }
+
         store.upsert_pattern(&entry).await?;
+
+        let trigger = if is_merge { "merge" } else { "new" };
+        let action_snippet = episode.action.chars().take(60).collect::<String>();
+
+        info!(
+            episode_id = %episode.id,
+            session_id = %session.id,
+            pattern_hash = %entry.pattern_hash,
+            trigger = %trigger,
+            strength = entry.strength,
+            threshold = entry.threshold,
+            novelty = assessment.scores.novelty,
+            tags_extracted = tags_count,
+            high_plasticity = check_signal.high_plasticity,
+            action = %action_snippet,
+            "buffer: ingested {} pattern (strength={:.2}, threshold={:.2})",
+            trigger, entry.strength, entry.threshold
+        );
+
         Ok(entry)
     }
 }

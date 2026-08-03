@@ -17,6 +17,7 @@ use crate::retrieval::{
     Bm25Params, Bm25Retrieval, RetrievalFusion, TemporalParams, TemporalRetrieval,
 };
 use crate::types::{ConstructiveKnowledge, RetrievalCandidate, RetrievalOutcome};
+use tracing::info;
 
 /// Top-level retrieval node that performs schema-guided search.
 #[derive(Debug, Clone)]
@@ -143,6 +144,20 @@ impl RetrievalArchitectureNode {
             HashMap::new()
         };
 
+        let semantic_count = semantic_results.len();
+        let bm25_count = bm25_results.len();
+
+        info!(
+            session_id = %session.id,
+            mode = ?retrieval_mode,
+            semantic_hits = semantic_count,
+            bm25_hits = bm25_count,
+            search_budget = search_budget as u32,
+            schema_prediction = %schema_prediction,
+            "retrieval: search complete — {} semantic + {} bm25 hits",
+            semantic_count, bm25_count
+        );
+
         // Fuse results if multi-strategy is enabled
         let mut candidates: Vec<RetrievalCandidate> =
             if self.use_bm25_search || self.use_temporal_search {
@@ -198,12 +213,26 @@ impl RetrievalArchitectureNode {
             postgres.save_engram(&candidate.engram).await?;
         }
 
-        let knowledge = self.constructive_assembly(
+let knowledge = self.constructive_assembly(
             &query,
             session,
             schema.as_ref(),
             &schema_prediction,
             &candidates,
+        );
+
+        let total_candidates = candidates.len();
+        let top_score = candidates.first().map(|c| c.similarity).unwrap_or(0.0);
+
+        info!(
+            session_id = %session.id,
+            mode = ?retrieval_mode,
+            schema_activated = schema.is_some(),
+            top_candidates = total_candidates,
+            top_score = top_score,
+            query_chars = query.len(),
+            "retrieval: returned {} final candidates (top score={:.2})",
+            total_candidates, top_score
         );
 
         Ok(RetrievalOutcome {

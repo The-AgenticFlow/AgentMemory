@@ -1,7 +1,10 @@
-use anyhow::{Context, Result};
+use std::time::Instant;
+
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use reqwest::{Client, Url};
 use serde::de::DeserializeOwned;
+use tracing::info;
 
 use crate::chat::{ChatRequest, ChatResponse};
 use crate::embeddings::{EmbeddingRequest, EmbeddingResponse};
@@ -118,13 +121,46 @@ impl LlmClient {
     }
 
     pub async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let request = self
+        let start = Instant::now();
+        let raw_response = self
             .http()
             .post(self.chat_url()?)
             .bearer_auth(&self.config.api_key)
-            .json(request);
-        let response = request.send().await?;
-        Ok(response.error_for_status()?.json::<ChatResponse>().await?)
+            .json(request)
+            .send()
+            .await
+            .context("llm http request failed")?;
+        let status = raw_response.status();
+        let latency_ms = start.elapsed().as_millis() as u64;
+
+        let parsed_response = raw_response
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("llm http status error after {}ms: {}", latency_ms, e))?;
+        let mut chat_response = parsed_response
+            .json::<ChatResponse>()
+            .await
+            .context("llm json parse failed")?;
+
+        let ep = self.config.base_url.to_string();
+        let model = chat_response.model.clone().unwrap_or_else(|| request.model.clone());
+        let usage = chat_response.usage.clone();
+        let prompt_tokens = usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0);
+        let completion_tokens = usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0);
+        let total_tokens = usage.as_ref().and_then(|u| u.total_tokens).unwrap_or(0);
+
+        info!(
+            endpoint = %ep,
+            model = %model,
+            status = %status,
+            latency_ms = latency_ms,
+            prompt_tokens = prompt_tokens,
+            completion_tokens = completion_tokens,
+            total_tokens = total_tokens,
+            response_chars = chat_response.choices.first().map(|c| c.message.content.chars().count()).unwrap_or(0),
+            "llm: chat call SUCCESS"
+        );
+
+        Ok(chat_response)
     }
 
     pub async fn stream_chat(&self, request: &ChatRequest) -> Result<Bytes> {
@@ -259,14 +295,39 @@ impl DashScopeClient {
     }
 
     pub async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let response = self
+        let start = Instant::now();
+        let raw_response = self
             .http()
             .post(self.chat_url("chat/completions")?)
             .bearer_auth(&self.config.api_key)
             .json(request)
             .send()
-            .await?;
-        Ok(response.error_for_status()?.json::<ChatResponse>().await?)
+            .await
+            .context("dashscope http request failed")?;
+        let status = raw_response.status();
+        let latency_ms = start.elapsed().as_millis() as u64;
+
+        let parsed_response = raw_response
+            .error_for_status()
+            .map_err(|e| anyhow::anyhow!("dashscope http status error after {}ms: {}", latency_ms, e))?;
+        let mut chat_response = parsed_response
+            .json::<ChatResponse>()
+            .await
+            .context("dashscope json parse failed")?;
+
+        let model = chat_response.model.clone().unwrap_or_else(|| request.model.clone());
+        let usage = chat_response.usage.clone();
+        let total_tokens = usage.as_ref().and_then(|u| u.total_tokens).unwrap_or(0);
+
+        info!(
+            endpoint = "dashscope",
+            model = %model,
+            status = %status,
+            latency_ms = latency_ms,
+            total_tokens = total_tokens,
+            "llm: dashscope chat SUCCESS"
+        );
+        Ok(chat_response)
     }
 
     pub async fn embeddings(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {

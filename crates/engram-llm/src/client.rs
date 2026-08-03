@@ -242,5 +242,3 @@ impl LlmClient {
             .unwrap_or_default())
     }
 }
-
-

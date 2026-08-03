@@ -296,15 +296,16 @@ impl NightlyConsolidationNode {
     ) -> Result<Vec<MetaEngram>> {
         let engrams = qdrant.list_engrams().await?;
         let existing_schemas = postgres.list_schemas().await?;
-        
+
         // Build a set of engram IDs already covered by existing schemas
-        let mut already_covered: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+        let mut already_covered: std::collections::HashSet<uuid::Uuid> =
+            std::collections::HashSet::new();
         for schema in &existing_schemas {
             for engram_id in &schema.source_engram_ids {
                 already_covered.insert(*engram_id);
             }
         }
-        
+
         let mut created = Vec::new();
         let mut visited = std::collections::HashSet::new();
 
@@ -317,7 +318,10 @@ impl NightlyConsolidationNode {
             visited.insert(left.id);
             let mut cluster = vec![left.clone()];
             for right in &engrams {
-                if left.id == right.id || visited.contains(&right.id) || already_covered.contains(&right.id) {
+                if left.id == right.id
+                    || visited.contains(&right.id)
+                    || already_covered.contains(&right.id)
+                {
                     continue;
                 }
 

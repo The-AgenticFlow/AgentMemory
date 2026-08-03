@@ -30,7 +30,8 @@ struct LokiStreamRequest {
 #[derive(Serialize)]
 struct LokiStream {
     stream: std::collections::HashMap<String, String>,
-    values: Vec<String>,
+    /// Each entry must be a `[timestamp_ns, line]` pair per the Loki push API.
+    values: Vec<[String; 2]>,
 }
 
 pub fn init_loki_sink(loki_url: String) {
@@ -133,14 +134,20 @@ impl<S: tracing::Subscriber> Layer<S> for LokiLayer {
         let request = LokiStreamRequest {
             streams: vec![LokiStream {
                 stream,
-                values: vec![format!("{} {}", timestamp, log_line)],
+                values: vec![[timestamp, log_line]],
             }],
         };
 
         let client = self.sink.client.clone();
         tokio::spawn(async move {
-            if let Err(e) = client.post(&url).json(&request).send().await {
-                eprintln!("Loki send failed: {}", e);
+            match client.post(&url).json(&request).send().await {
+                Ok(resp) if !resp.status().is_success() => {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    eprintln!("Loki push rejected: {status} {body}");
+                }
+                Err(e) => eprintln!("Loki send failed: {e}"),
+                _ => {}
             }
         });
     }

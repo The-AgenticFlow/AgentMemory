@@ -91,30 +91,46 @@ impl NightlyConsolidationNode {
         postgres: &PostgresMemoryStore,
         qwen: Option<&DashScopeClient>,
     ) -> Result<Vec<MetaEngram>> {
-        self.decay_engrams(qdrant, postgres).await?;
+        let started_at = std::time::Instant::now();
+        tracing::info!("consolidation run started");
+
+        let decayed = self.decay_engrams(qdrant, postgres).await?;
+        tracing::info!("consolidation decay: processed {decayed} engrams");
+
         if let Some(client) = qwen {
             self.refine_engram_tags(qdrant, postgres, client).await?;
+        } else {
+            tracing::info!("consolidation tag refinement skipped: no LLM client configured");
         }
+
         let (evicted_patterns, expired_wm, cleaned_engrams) =
             self.cleanup(qdrant, postgres).await?;
-        if evicted_patterns > 0 || expired_wm > 0 || cleaned_engrams > 0 {
-            tracing::info!(
-                "consolidation cleanup: evicted {} patterns, expired {} working-memory entries, removed {} archived engrams",
-                evicted_patterns,
-                expired_wm,
-                cleaned_engrams
-            );
-        }
-        self.compress_schemas(qdrant, postgres, qwen).await
+        tracing::info!(
+            "consolidation cleanup: evicted {} patterns, expired {} working-memory entries, removed {} archived engrams",
+            evicted_patterns,
+            expired_wm,
+            cleaned_engrams
+        );
+
+        let created = self.compress_schemas(qdrant, postgres, qwen).await?;
+        tracing::info!(
+            "consolidation run completed in {:?}: created {} schemas",
+            started_at.elapsed(),
+            created.len()
+        );
+
+        Ok(created)
     }
 
     /// Applies time-based decay and status updates to all active engrams.
+    /// Returns the number of engrams processed.
     async fn decay_engrams(
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let engrams: Vec<EngramEntry> = qdrant.list_engrams().await?;
+        let count = engrams.len();
         let now = chrono::Utc::now();
         for engram in engrams {
             let mut updated = engram.clone();
@@ -154,7 +170,7 @@ impl NightlyConsolidationNode {
             qdrant.upsert_engram(&updated).await?;
             postgres.save_engram(&updated).await?;
         }
-        Ok(())
+        Ok(count)
     }
 
     /// Computes a per-engram decay rate modulated by thalamus scores.

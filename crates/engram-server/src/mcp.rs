@@ -269,6 +269,7 @@ async fn call_tool(state: &AppState, params: Value) -> Result<Value, (i64, Strin
             .map_err(internal)?
         }
         "memory_reflect" => {
+            tracing::info!("consolidation triggered via MCP memory_reflect");
             let schemas = state.system.consolidate().await.map_err(internal)?;
             json!({ "created_schemas": schemas.len(), "schemas": schemas })
         }

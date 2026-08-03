@@ -994,6 +994,7 @@ pub async fn consolidate(
     State(state): State<AppState>,
     Json(request): Json<ConsolidateRequest>,
 ) -> ApiResult<Json<ConsolidationResponse>> {
+    tracing::info!("consolidation triggered via API (debug={})", request.debug);
     let created = state.system.consolidate().await.map_err(internal_error)?;
     let debug_info = if request.debug {
         Some(

@@ -1,5 +1,6 @@
 //! HTTP server for the Engram runtime.
 
+pub mod loki_sink;
 pub mod mcp;
 pub mod routes;
 

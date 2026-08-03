@@ -415,6 +415,7 @@ dependencies = [
  "engram-runtime",
  "engram-store",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

@@ -16,6 +16,7 @@ engram-llm = { path = "../engram-llm" }
 engram-runtime = { path = "../engram-runtime" }
 engram-store = { path = "../engram-store" }
 dotenvy.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

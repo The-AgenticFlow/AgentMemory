@@ -2,11 +2,21 @@ use std::net::SocketAddr;
 
 use engram_llm::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
 use engram_server::{
-    AppState, build_app, mcp,
+    AppState, build_app, loki_sink, mcp,
     routes::{LogBuffer, LogCaptureLayer},
 };
 use tokio::net::TcpListener;
-use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+fn init_tracing() {
+    std::env::var("ENGRAM_LOKI_URL")
+        .ok()
+        .filter(|url| !url.is_empty())
+        .map(loki_sink::init_loki_sink);
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::registry().with(env_filter).try_init();
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,11 +24,10 @@ async fn main() -> anyhow::Result<()> {
     // This is a no-op if the file is missing or cannot be read.
     let _ = dotenvy::dotenv();
 
-    let log_buffer = LogBuffer::new();
-    init_tracing(log_buffer.clone());
+    init_tracing();
     tracing::info!("engram-server tracing initialized");
     tracing::warn!(
-        "[CRITICAL] engram-server STARTING with /logs support - if you see this, the new code is running!"
+        "[CRITICAL] engram-server STARTING with Loki logging - if you see this, the new code is running!"
     );
     tracing::warn!(
         "[CRITICAL] Build time: {}",
@@ -27,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
             .unwrap()
             .as_secs()
     );
+
+    let log_buffer = LogBuffer::new();
 
     if std::env::args().nth(1).as_deref() == Some("mcp-stdio") {
         let state = app_state_from_env(log_buffer).await?;
@@ -46,19 +57,6 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
-
-fn init_tracing(log_buffer: LogBuffer) {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(env_filter);
-
-    let capture_layer = LogCaptureLayer::new(log_buffer);
-
-    let _ = tracing_subscriber::registry()
-        .with(fmt_layer)
-        .with(capture_layer)
-        .try_init();
 }
 
 async fn app_state_from_env(log_buffer: LogBuffer) -> anyhow::Result<AppState> {

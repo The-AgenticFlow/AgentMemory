@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use engram_core::{Episode, MetaEngram, Session, SessionMode, ThalamusScores, WorkingContext};
-use engram_llm::{DashScopeClient, LlmClient};
+use engram_llm::LlmClient;
 use engram_store::{
     ConfigAuditRecord, IngestionRecord, Neo4jHealth, Neo4jMemoryStore, OssMemoryStore,
     PostgresMemoryStore, QdrantMemoryStore,
@@ -37,8 +37,6 @@ pub struct MemorySystem {
     pub postgres: PostgresMemoryStore,
     /// Object store for raw episode payloads.
     pub oss: OssMemoryStore,
-    /// Optional Qwen client for remote reasoning and embeddings.
-    pub qwen: Option<DashScopeClient>,
     /// Optional generic OpenAI-compatible LLM client.
     pub llm: Option<LlmClient>,
     thalamus: ThalamusFilterNode,
@@ -123,7 +121,6 @@ impl MemorySystem {
             qdrant: QdrantMemoryStore::default(),
             postgres: PostgresMemoryStore::default(),
             oss: OssMemoryStore,
-            qwen: None,
             llm: None,
             thalamus: ThalamusFilterNode::default(),
             buffer: BufferIngestNode::default(),
@@ -135,12 +132,6 @@ impl MemorySystem {
             config: Arc::new(RwLock::new(RuntimeConfig::default())),
             adaptive: Arc::new(Mutex::new(AdaptiveThresholdState::default())),
         }
-    }
-
-    /// Installs a Qwen client for remote API calls.
-    pub fn with_qwen(mut self, qwen: DashScopeClient) -> Self {
-        self.qwen = Some(qwen);
-        self
     }
 
     /// Installs a generic OpenAI-compatible LLM client for remote API calls.
@@ -427,7 +418,7 @@ impl MemorySystem {
         let created = self
             .consolidation
             .with_config(&config.consolidation)
-            .run(&self.qdrant, &self.postgres, self.qwen.as_ref())
+            .run(&self.qdrant, &self.postgres, self.llm.as_ref())
             .await?;
         for schema in &created {
             if let Err(error) = self.neo4j.upsert_schema(schema).await {

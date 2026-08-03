@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use engram_core::EngramEntry;
 use engram_llm::{
-    DashScopeClient,
+    LlmClient,
     chat::{ChatMessage, ChatRequest},
 };
 
@@ -617,7 +617,7 @@ struct TagExtraction {
 /// Returns the merged deduplicated tag list (heuristic + LLM concepts).
 pub async fn refine_tags_with_llm(
     engram: &EngramEntry,
-    qwen: &DashScopeClient,
+    llm: &LlmClient,
     max_concepts: usize,
 ) -> anyhow::Result<Vec<String>> {
     let content = engram
@@ -652,7 +652,7 @@ pub async fn refine_tags_with_llm(
         ],
     );
 
-    let response = qwen.chat(&request).await?;
+    let response = llm.chat(&request).await?;
     let raw = response
         .choices
         .first()

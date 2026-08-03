@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use engram_llm::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
+use engram_llm::{LlmClient, LlmConfig};
 use engram_server::{AppState, build_app, loki_sink, mcp, routes::LogBuffer};
 use tokio::net::TcpListener;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -74,9 +74,10 @@ async fn app_state_from_env(log_buffer: LogBuffer) -> anyhow::Result<AppState> {
         state.system = state.system.with_llm(client);
         tracing::info!("[engram-server] LLM client connected: {}", endpoint);
     } else if let Ok(api_key) = std::env::var("ENGRAM_DASHSCOPE_API_KEY") {
-        let client = DashScopeClient::new(DashScopeConfig::new(api_key)?);
-        state.system = state.system.with_qwen(client);
-        tracing::info!("[engram-server] Qwen client connected (DashScope).");
+        let config = LlmConfig::new(api_key)?;
+        let client = LlmClient::new(config);
+        state.system = state.system.with_llm(client);
+        tracing::info!("[engram-server] LLM client connected (DashScope via LlmClient).");
     } else {
         let msg = "[engram-server] LLM client NOT connected: LLM_ENDPOINT or ENGRAM_DASHSCOPE_API_KEY is missing. Chat will use local fallback replies.";
         if require_llm {

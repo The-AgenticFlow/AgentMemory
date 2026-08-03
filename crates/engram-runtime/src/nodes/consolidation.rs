@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use engram_core::{EngramEntry, EngramStatus, MetaEngram};
-use engram_llm::DashScopeClient;
+use engram_llm::LlmClient;
 use engram_llm::chat::{ChatMessage, ChatRequest};
 use engram_store::{PostgresMemoryStore, QdrantMemoryStore};
 use serde::Deserialize;
@@ -89,7 +89,7 @@ impl NightlyConsolidationNode {
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
-        qwen: Option<&DashScopeClient>,
+        llm: Option<&LlmClient>,
     ) -> Result<Vec<MetaEngram>> {
         let started_at = std::time::Instant::now();
         tracing::info!("consolidation run started");
@@ -97,7 +97,7 @@ impl NightlyConsolidationNode {
         let decayed = self.decay_engrams(qdrant, postgres).await?;
         tracing::info!("consolidation decay: processed {decayed} engrams");
 
-        if let Some(client) = qwen {
+        if let Some(client) = llm {
             self.refine_engram_tags(qdrant, postgres, client).await?;
         } else {
             tracing::info!("consolidation tag refinement skipped: no LLM client configured");
@@ -112,7 +112,7 @@ impl NightlyConsolidationNode {
             cleaned_engrams
         );
 
-        let created = self.compress_schemas(qdrant, postgres, qwen).await?;
+        let created = self.compress_schemas(qdrant, postgres, llm).await?;
         tracing::info!(
             "consolidation run completed in {:?}: created {} schemas",
             started_at.elapsed(),
@@ -251,7 +251,7 @@ impl NightlyConsolidationNode {
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
-        qwen: &DashScopeClient,
+        llm: &LlmClient,
     ) -> Result<()> {
         let engrams = qdrant.list_engrams().await?;
         let mut refined_count = 0usize;
@@ -261,7 +261,7 @@ impl NightlyConsolidationNode {
                 continue;
             }
 
-            match refine_tags_with_llm(engram, qwen, self.max_concepts).await {
+            match refine_tags_with_llm(engram, llm, self.max_concepts).await {
                 Ok(refined_tags) => {
                     if refined_tags.len() > engram.tags.len() {
                         let mut updated = engram.clone();
@@ -292,21 +292,32 @@ impl NightlyConsolidationNode {
         &self,
         qdrant: &QdrantMemoryStore,
         postgres: &PostgresMemoryStore,
-        qwen: Option<&DashScopeClient>,
+        llm: Option<&LlmClient>,
     ) -> Result<Vec<MetaEngram>> {
         let engrams = qdrant.list_engrams().await?;
+        let existing_schemas = postgres.list_schemas().await?;
+        
+        // Build a set of engram IDs already covered by existing schemas
+        let mut already_covered: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+        for schema in &existing_schemas {
+            for engram_id in &schema.source_engram_ids {
+                already_covered.insert(*engram_id);
+            }
+        }
+        
         let mut created = Vec::new();
         let mut visited = std::collections::HashSet::new();
 
         for left in &engrams {
-            if visited.contains(&left.id) {
+            // Skip engrams already covered by an existing schema
+            if already_covered.contains(&left.id) || visited.contains(&left.id) {
                 continue;
             }
 
             visited.insert(left.id);
             let mut cluster = vec![left.clone()];
             for right in &engrams {
-                if left.id == right.id || visited.contains(&right.id) {
+                if left.id == right.id || visited.contains(&right.id) || already_covered.contains(&right.id) {
                     continue;
                 }
 
@@ -325,8 +336,8 @@ impl NightlyConsolidationNode {
             let tags = cluster_tag_intersection(&cluster);
             let source_engram_ids = cluster.iter().map(|engram| engram.id).collect::<Vec<_>>();
             let mut prediction_fields = tags.iter().take(4).cloned().collect::<Vec<_>>();
-            if let Some(qwen) = qwen
-                && let Ok(extraction) = extract_schema_fields(qwen, &cluster).await
+            if let Some(llm_client) = llm
+                && let Ok(extraction) = extract_schema_fields(llm_client, &cluster).await
                 && !extraction.prediction_fields.is_empty()
             {
                 prediction_fields = extraction.prediction_fields;
@@ -433,7 +444,7 @@ struct SchemaExtraction {
 }
 
 async fn extract_schema_fields(
-    qwen: &DashScopeClient,
+    llm: &LlmClient,
     cluster: &[EngramEntry],
 ) -> Result<SchemaExtraction> {
     let context = cluster
@@ -466,7 +477,7 @@ async fn extract_schema_fields(
         ],
     );
 
-    let response = qwen.chat(&request).await?;
+    let response = llm.chat(&request).await?;
     let content = response
         .choices
         .first()

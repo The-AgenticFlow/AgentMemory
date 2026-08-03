@@ -240,7 +240,6 @@ pub fn router(state: AppState) -> Router {
 pub struct HealthResponse {
     pub status: &'static str,
     pub sessions: usize,
-    pub qwen_connected: bool,
     pub llm_connected: bool,
 }
 
@@ -389,7 +388,6 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
         sessions,
-        qwen_connected: state.system.qwen.is_some(),
         llm_connected: state.system.llm.is_some(),
     })
 }
@@ -1056,7 +1054,7 @@ async fn generate_reply(
 
     if let Some(llm) = &state.system.llm {
         let model = get_llm_model();
-        match llm.chat(&ChatRequest::new(model, messages.clone())).await {
+        match llm.chat(&ChatRequest::new(model, messages)).await {
             Ok(response) => {
                 if let Some(choice) = response.choices.first() {
                     return choice.message.content.clone();
@@ -1064,18 +1062,6 @@ async fn generate_reply(
             }
             Err(e) => {
                 tracing::warn!("LLM chat call failed: {e}");
-            }
-        }
-    } else if let Some(qwen) = &state.system.qwen {
-        let model = get_llm_model();
-        match qwen.chat(&ChatRequest::new(model, messages)).await {
-            Ok(response) => {
-                if let Some(choice) = response.choices.first() {
-                    return choice.message.content.clone();
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Qwen chat call failed: {e}");
             }
         }
     }

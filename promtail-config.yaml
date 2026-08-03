@@ -16,7 +16,7 @@ scrape_configs:
         labels:
           job: docker
           service: engram
-        __path__: /var/lib/docker/containers/**/ *.log
+        __path__: /var/lib/docker/containers/**/*-json.log
     pipeline_stages:
       - json:
           expressions:

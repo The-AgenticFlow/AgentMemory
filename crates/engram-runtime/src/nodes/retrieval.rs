@@ -213,7 +213,7 @@ impl RetrievalArchitectureNode {
             postgres.save_engram(&candidate.engram).await?;
         }
 
-let knowledge = self.constructive_assembly(
+        let knowledge = self.constructive_assembly(
             &query,
             session,
             schema.as_ref(),

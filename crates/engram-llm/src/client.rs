@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use reqwest::{Client, Url};
 use serde::de::DeserializeOwned;
@@ -136,16 +136,22 @@ impl LlmClient {
         let parsed_response = raw_response
             .error_for_status()
             .map_err(|e| anyhow::anyhow!("llm http status error after {}ms: {}", latency_ms, e))?;
-        let mut chat_response = parsed_response
+        let chat_response = parsed_response
             .json::<ChatResponse>()
             .await
             .context("llm json parse failed")?;
 
         let ep = self.config.base_url.to_string();
-        let model = chat_response.model.clone().unwrap_or_else(|| request.model.clone());
+        let model = chat_response
+            .model
+            .clone()
+            .unwrap_or_else(|| request.model.clone());
         let usage = chat_response.usage.clone();
         let prompt_tokens = usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0);
-        let completion_tokens = usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0);
+        let completion_tokens = usage
+            .as_ref()
+            .and_then(|u| u.completion_tokens)
+            .unwrap_or(0);
         let total_tokens = usage.as_ref().and_then(|u| u.total_tokens).unwrap_or(0);
 
         info!(
@@ -307,15 +313,18 @@ impl DashScopeClient {
         let status = raw_response.status();
         let latency_ms = start.elapsed().as_millis() as u64;
 
-        let parsed_response = raw_response
-            .error_for_status()
-            .map_err(|e| anyhow::anyhow!("dashscope http status error after {}ms: {}", latency_ms, e))?;
-        let mut chat_response = parsed_response
+        let parsed_response = raw_response.error_for_status().map_err(|e| {
+            anyhow::anyhow!("dashscope http status error after {}ms: {}", latency_ms, e)
+        })?;
+        let chat_response = parsed_response
             .json::<ChatResponse>()
             .await
             .context("dashscope json parse failed")?;
 
-        let model = chat_response.model.clone().unwrap_or_else(|| request.model.clone());
+        let model = chat_response
+            .model
+            .clone()
+            .unwrap_or_else(|| request.model.clone());
         let usage = chat_response.usage.clone();
         let total_tokens = usage.as_ref().and_then(|u| u.total_tokens).unwrap_or(0);
 

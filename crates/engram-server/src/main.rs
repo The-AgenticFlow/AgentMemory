@@ -1,18 +1,17 @@
 use std::net::SocketAddr;
 
 use engram_llm::{DashScopeClient, DashScopeConfig, LlmClient, LlmConfig};
-use engram_server::{
-    AppState, build_app, loki_sink, mcp,
-    routes::{LogBuffer, LogCaptureLayer},
-};
+use engram_server::{AppState, build_app, loki_sink, mcp, routes::LogBuffer};
 use tokio::net::TcpListener;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn init_tracing() {
-    std::env::var("ENGRAM_LOKI_URL")
+    if let Some(url) = std::env::var("ENGRAM_LOKI_URL")
         .ok()
-        .filter(|url| !url.is_empty())
-        .map(loki_sink::init_loki_sink);
+        .filter(|u| !u.is_empty())
+    {
+        loki_sink::init_loki_sink(url);
+    }
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = tracing_subscriber::registry().with(env_filter).try_init();

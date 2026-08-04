@@ -146,7 +146,14 @@ impl NightlyConsolidationNode {
         tracing::info!("");
         tracing::info!("PHASE 4: SCHEMA COMPRESSION");
         let phase4 = std::time::Instant::now();
-        let created = self.compress_schemas(qdrant, postgres, llm).await?;
+        let created = match self.compress_schemas(qdrant, postgres, llm).await {
+            Ok(schema) => schema,
+            Err(e) => {
+                tracing::error!("  ❌ Schema compression failed: {}", e);
+                tracing::warn!("  Returning empty schema list - engrams NOT consolidated");
+                vec![]
+            }
+        };
 
         tracing::info!("");
         tracing::info!("========================================");
@@ -227,6 +234,7 @@ impl NightlyConsolidationNode {
     }
 
     /// Decays buffered patterns, expires working memory, and removes stale archived engrams.
+    /// Errors are logged but don't stop consolidation - we continue to Phase 4.
     async fn cleanup(
         &self,
         qdrant: &QdrantMemoryStore,
@@ -236,65 +244,73 @@ impl NightlyConsolidationNode {
         let mut evicted_patterns = 0usize;
         let mut cleaned_engrams = 0usize;
 
-        // 1. Pattern decay and eviction
-        let patterns = if self.pattern_decay_enabled {
-            qdrant.list_patterns().await?
-        } else {
-            vec![]
+        // 1. Pattern decay and eviction (with error handling)
+        let patterns = match qdrant.list_patterns().await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(
+                    "  Cleanup: Failed to list patterns, skipping pattern decay: {}",
+                    e
+                );
+                vec![]
+            }
         };
         tracing::info!("  Pattern count: {} patterns in buffer", patterns.len());
 
         for pattern in patterns {
             let days_since = (now - pattern.last_seen).num_days() as f32;
             if days_since < 1.0 {
-                tracing::debug!(
-                    "  Pattern {}: skip (days_since={} < 1)",
-                    pattern.pattern_hash,
-                    days_since
-                );
                 continue;
             }
-            let decayed_strength = pattern.strength * (-pattern.decay_rate * days_since).exp();
-            tracing::debug!(
-                "  Pattern {}: strength={} → {} (days={}, rate={})",
-                pattern.pattern_hash,
-                pattern.strength,
-                decayed_strength,
-                days_since,
-                pattern.decay_rate
-            );
+            let decayed_strength =
+                (pattern.strength * (-pattern.decay_rate * days_since).exp()).clamp(0.0, 1.0);
+
             if decayed_strength <= self.pattern_eviction_threshold {
-                tracing::info!(
-                    "  Evicting pattern {} (strength={} <= threshold={})",
-                    pattern.pattern_hash,
-                    decayed_strength,
-                    self.pattern_eviction_threshold
-                );
-                qdrant.delete_pattern(&pattern.pattern_hash).await?;
-                evicted_patterns += 1;
+                match qdrant.delete_pattern(&pattern.pattern_hash).await {
+                    Ok(_) => {
+                        evicted_patterns += 1;
+                        tracing::debug!("  Evicted pattern (strength={})", decayed_strength);
+                    }
+                    Err(e) => {
+                        tracing::warn!("  Failed to evict pattern: {}", e);
+                    }
+                }
             } else if decayed_strength < pattern.strength {
                 let mut updated = pattern.clone();
-                updated.strength = decayed_strength.clamp(0.0, 1.0);
-                qdrant.upsert_pattern(&updated).await?;
+                updated.strength = decayed_strength;
+                if let Err(e) = qdrant.upsert_pattern(&updated).await {
+                    tracing::warn!("  Failed to update pattern: {}", e);
+                }
             }
         }
         tracing::info!("  Patterns evicted: {}", evicted_patterns);
 
-        // 2. Working memory expiry
-        tracing::info!(
-            "  Expiring working memory (threshold={})...",
-            self.working_memory_min_strength
-        );
-        let expired = postgres
+        // 2. Working memory expiry (with error handling)
+        let expired_wm = match postgres
             .expire_working_memory(self.working_memory_min_strength)
-            .await?;
-        let expired_wm = expired.len();
+            .await
+        {
+            Ok(expired) => expired.len(),
+            Err(e) => {
+                tracing::warn!("  Failed to expire working memory: {}", e);
+                0
+            }
+        };
         tracing::info!("  Working memory entries expired: {}", expired_wm);
 
-        // 3. Archived engram cleanup
+        // 3. Archived engram cleanup (with error handling)
         if self.archive_cleanup_days > 0 {
             let mut deleted_ids = Vec::new();
-            let all_engrams = qdrant.list_engrams().await?;
+            let all_engrams = match qdrant.list_engrams().await {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!(
+                        "  Cleanup: Failed to list engrams, skipping archive cleanup: {}",
+                        e
+                    );
+                    vec![]
+                }
+            };
             let archived_count = all_engrams
                 .iter()
                 .filter(|e| matches!(e.status, EngramStatus::Archived))
@@ -310,15 +326,18 @@ impl NightlyConsolidationNode {
                     let last_active = engram.last_accessed.unwrap_or(engram.created_at);
                     let age_days = (now - last_active).num_days();
                     if age_days > self.archive_cleanup_days {
-                        tracing::info!(
-                            "  Deleting archived engram {} (age={} days)",
-                            engram.id,
-                            age_days
-                        );
-                        qdrant.delete_engram(engram.id).await?;
-                        postgres.delete_engram(engram.id).await?;
-                        deleted_ids.push(engram.id);
-                        cleaned_engrams += 1;
+                        if let Err(e) = qdrant.delete_engram(engram.id).await {
+                            tracing::warn!("  Failed to delete archived engram from qdrant: {}", e);
+                        } else if let Err(e) = postgres.delete_engram(engram.id).await {
+                            tracing::warn!(
+                                "  Failed to delete archived engram from postgres: {}",
+                                e
+                            );
+                        } else {
+                            deleted_ids.push(engram.id);
+                            cleaned_engrams += 1;
+                            tracing::debug!("  Deleted archived engram (age={} days)", age_days);
+                        }
                     }
                 }
             }

@@ -352,8 +352,21 @@ impl NightlyConsolidationNode {
         let mut refined_count = 0usize;
 
         // Parallelize LLM calls with concurrency limit
-        const CONCURRENT_REFINEMENTS: usize = 5;
-        for chunk in engrams.chunks(CONCURRENT_REFINEMENTS) {
+        const CONCURRENT_REFINEMENTS: usize = 3;
+        let total_chunks = engrams.len().div_ceil(CONCURRENT_REFINEMENTS);
+        tracing::info!(
+            "  Starting tag refinement: {} engrams, {} chunks of {}",
+            engrams
+                .iter()
+                .filter(|e| e.episodic_content_ref.is_some())
+                .count(),
+            total_chunks,
+            CONCURRENT_REFINEMENTS
+        );
+
+        for (chunk_idx, chunk) in engrams.chunks(CONCURRENT_REFINEMENTS).enumerate() {
+            tracing::info!("  Processing chunk {}/{}...", chunk_idx + 1, total_chunks);
+
             let futures = chunk
                 .iter()
                 .filter_map(|engram| {
@@ -375,15 +388,32 @@ impl NightlyConsolidationNode {
                 .collect::<Vec<_>>();
 
             let results = futures::future::join_all(futures).await;
+            let mut saved_in_batch = 0usize;
             for updated in results.into_iter().flatten() {
-                qdrant.upsert_engram(&updated).await?;
-                postgres.save_engram(&updated).await?;
-                refined_count += 1;
+                if let Err(e) = qdrant.upsert_engram(&updated).await {
+                    tracing::warn!("  Failed to save engram {} to qdrant: {}", updated.id, e);
+                } else if let Err(e) = postgres.save_engram(&updated).await {
+                    tracing::warn!("  Failed to save engram {} to postgres: {}", updated.id, e);
+                } else {
+                    refined_count += 1;
+                    saved_in_batch += 1;
+                }
             }
+            tracing::info!(
+                "  Chunk {}/{} complete: {} refined this batch",
+                chunk_idx + 1,
+                total_chunks,
+                saved_in_batch
+            );
         }
 
         if refined_count > 0 {
-            tracing::info!("consolidation refined tags for {refined_count} engrams");
+            tracing::info!(
+                "  Tag refinement complete: {} engrams refined total",
+                refined_count
+            );
+        } else {
+            tracing::info!("  Tag refinement complete: no engrams needed refinement");
         }
 
         Ok(())

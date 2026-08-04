@@ -92,20 +92,27 @@ impl NightlyConsolidationNode {
         llm: Option<&LlmClient>,
     ) -> Result<Vec<MetaEngram>> {
         let started_at = std::time::Instant::now();
-        
+
         tracing::info!("");
         tracing::info!("========================================");
         tracing::info!("🚀 CONSOLIDATION RUN STARTED");
         tracing::info!("========================================");
-        tracing::info!("Config: schema_threshold={:.2}, base_decay_rate={:.2}", 
-            self.schema_threshold, self.base_decay_rate);
+        tracing::info!(
+            "Config: schema_threshold={:.2}, base_decay_rate={:.2}",
+            self.schema_threshold,
+            self.base_decay_rate
+        );
 
         // ── Phase 1: Decay ───────────────────────────────────────
         tracing::info!("");
         tracing::info!("PHASE 1: DECAY");
         let phase1 = std::time::Instant::now();
         let decayed = self.decay_engrams(qdrant, postgres).await?;
-        tracing::info!("  → Decay complete: processed {} engrams in {:?}", decayed, phase1.elapsed());
+        tracing::info!(
+            "  → Decay complete: processed {} engrams in {:?}",
+            decayed,
+            phase1.elapsed()
+        );
         tracing::info!("  → Updated engrams in qdrant and postgres");
 
         // ── Phase 2: Tag Refinement ───────────────────────────────
@@ -140,14 +147,19 @@ impl NightlyConsolidationNode {
         tracing::info!("PHASE 4: SCHEMA COMPRESSION");
         let phase4 = std::time::Instant::now();
         let created = self.compress_schemas(qdrant, postgres, llm).await?;
-        
+
         tracing::info!("");
         tracing::info!("========================================");
         tracing::info!("✅ CONSOLIDATION RUN COMPLETE");
         tracing::info!("========================================");
         tracing::info!("  Total time: {:?}", started_at.elapsed());
-        tracing::info!("  Phase timings: decay={:?}, tag_refinement={:?}, cleanup={:?}, compress={:?}",
-            phase1.elapsed(), phase2.elapsed(), phase3.elapsed(), phase4.elapsed());
+        tracing::info!(
+            "  Phase timings: decay={:?}, tag_refinement={:?}, cleanup={:?}, compress={:?}",
+            phase1.elapsed(),
+            phase2.elapsed(),
+            phase3.elapsed(),
+            phase4.elapsed()
+        );
         tracing::info!("  Schemas created: {}", created.len());
         tracing::info!("========================================");
         tracing::info!("");
@@ -231,11 +243,15 @@ impl NightlyConsolidationNode {
             vec![]
         };
         tracing::info!("  Pattern count: {} patterns in buffer", patterns.len());
-        
+
         for pattern in patterns {
             let days_since = (now - pattern.last_seen).num_days() as f32;
             if days_since < 1.0 {
-                tracing::debug!("  Pattern {}: skip (days_since={} < 1)", pattern.pattern_hash, days_since);
+                tracing::debug!(
+                    "  Pattern {}: skip (days_since={} < 1)",
+                    pattern.pattern_hash,
+                    days_since
+                );
                 continue;
             }
             let decayed_strength = pattern.strength * (-pattern.decay_rate * days_since).exp();
@@ -248,8 +264,12 @@ impl NightlyConsolidationNode {
                 pattern.decay_rate
             );
             if decayed_strength <= self.pattern_eviction_threshold {
-                tracing::info!("  Evicting pattern {} (strength={} <= threshold={})",
-                    pattern.pattern_hash, decayed_strength, self.pattern_eviction_threshold);
+                tracing::info!(
+                    "  Evicting pattern {} (strength={} <= threshold={})",
+                    pattern.pattern_hash,
+                    decayed_strength,
+                    self.pattern_eviction_threshold
+                );
                 qdrant.delete_pattern(&pattern.pattern_hash).await?;
                 evicted_patterns += 1;
             } else if decayed_strength < pattern.strength {
@@ -261,7 +281,10 @@ impl NightlyConsolidationNode {
         tracing::info!("  Patterns evicted: {}", evicted_patterns);
 
         // 2. Working memory expiry
-        tracing::info!("  Expiring working memory (threshold={})...", self.working_memory_min_strength);
+        tracing::info!(
+            "  Expiring working memory (threshold={})...",
+            self.working_memory_min_strength
+        );
         let expired = postgres
             .expire_working_memory(self.working_memory_min_strength)
             .await?;
@@ -272,16 +295,26 @@ impl NightlyConsolidationNode {
         if self.archive_cleanup_days > 0 {
             let mut deleted_ids = Vec::new();
             let all_engrams = qdrant.list_engrams().await?;
-            let archived_count = all_engrams.iter().filter(|e| matches!(e.status, EngramStatus::Archived)).count();
-            tracing::info!("  Checking {} archived engrams (cleanup after {} days)...", 
-                archived_count, self.archive_cleanup_days);
-            
+            let archived_count = all_engrams
+                .iter()
+                .filter(|e| matches!(e.status, EngramStatus::Archived))
+                .count();
+            tracing::info!(
+                "  Checking {} archived engrams (cleanup after {} days)...",
+                archived_count,
+                self.archive_cleanup_days
+            );
+
             for engram in all_engrams {
                 if matches!(engram.status, EngramStatus::Archived) {
                     let last_active = engram.last_accessed.unwrap_or(engram.created_at);
                     let age_days = (now - last_active).num_days();
                     if age_days > self.archive_cleanup_days {
-                        tracing::info!("  Deleting archived engram {} (age={} days)", engram.id, age_days);
+                        tracing::info!(
+                            "  Deleting archived engram {} (age={} days)",
+                            engram.id,
+                            age_days
+                        );
                         qdrant.delete_engram(engram.id).await?;
                         postgres.delete_engram(engram.id).await?;
                         deleted_ids.push(engram.id);
@@ -290,7 +323,10 @@ impl NightlyConsolidationNode {
                 }
             }
             if !deleted_ids.is_empty() {
-                tracing::info!("  Cleaning up {} schemas with deleted engram IDs", deleted_ids.len());
+                tracing::info!(
+                    "  Cleaning up {} schemas with deleted engram IDs",
+                    deleted_ids.len()
+                );
                 postgres.cleanup_schemas(&deleted_ids).await?;
             }
         } else {
@@ -318,24 +354,25 @@ impl NightlyConsolidationNode {
         // Parallelize LLM calls with concurrency limit
         const CONCURRENT_REFINEMENTS: usize = 5;
         for chunk in engrams.chunks(CONCURRENT_REFINEMENTS) {
-            let futures = chunk.iter().filter_map(|engram| {
-                if engram.episodic_content_ref.is_none() {
-                    return None;
-                }
-                let engram = engram.clone();
-                let llm = llm.clone();
-                let max_concepts = self.max_concepts;
-                Some(async move {
-                    match refine_tags_with_llm(&engram, &llm, max_concepts).await {
-                        Ok(refined_tags) if refined_tags.len() > engram.tags.len() => {
-                            let mut updated = engram;
-                            updated.tags = refined_tags;
-                            Some(updated)
+            let futures = chunk
+                .iter()
+                .filter_map(|engram| {
+                    let _ = engram.episodic_content_ref.as_ref()?;
+                    let engram = engram.clone();
+                    let llm = llm.clone();
+                    let max_concepts = self.max_concepts;
+                    Some(async move {
+                        match refine_tags_with_llm(&engram, &llm, max_concepts).await {
+                            Ok(refined_tags) if refined_tags.len() > engram.tags.len() => {
+                                let mut updated = engram;
+                                updated.tags = refined_tags;
+                                Some(updated)
+                            }
+                            _ => None,
                         }
-                        _ => None,
-                    }
+                    })
                 })
-            }).collect::<Vec<_>>();
+                .collect::<Vec<_>>();
 
             let results = futures::future::join_all(futures).await;
             for updated in results.into_iter().flatten() {
@@ -404,7 +441,7 @@ impl NightlyConsolidationNode {
             );
         }
 
-let mut created = Vec::new();
+        let mut created = Vec::new();
         let mut visited = std::collections::HashSet::new();
         let mut cluster_attempts: usize;
         let mut singletons_skipped: usize;
@@ -435,7 +472,11 @@ let mut created = Vec::new();
 
             visited.insert(left.id);
             let mut cluster = vec![left.clone()];
-            tracing::info!("Starting cluster with left={}, tags={:?}", left.id, left.tags);
+            tracing::info!(
+                "Starting cluster with left={}, tags={:?}",
+                left.id,
+                left.tags
+            );
 
             for right in &engrams {
                 if left.id == right.id
@@ -448,7 +489,7 @@ let mut created = Vec::new();
                 total_pairs_checked += 1;
                 let similarity = cosine_similarity(&left.embedding, &right.embedding);
                 let tags_match = shared_tag(left, right);
-                
+
                 // Track similarity stats
                 max_similarity_seen = max_similarity_seen.max(similarity);
                 if similarity >= self.schema_threshold {
@@ -463,7 +504,10 @@ let mut created = Vec::new();
                     similarity,
                     self.schema_threshold,
                     tags_match,
-                    left.tags.iter().filter(|t| right.tags.contains(t)).collect::<Vec<_>>()
+                    left.tags
+                        .iter()
+                        .filter(|t| right.tags.contains(t))
+                        .collect::<Vec<_>>()
                 );
 
                 if similarity >= self.schema_threshold || tags_match {
@@ -482,7 +526,7 @@ let mut created = Vec::new();
             let embedding = average_embedding(&cluster);
             let tags = cluster_tag_intersection(&cluster);
             let source_engram_ids = cluster.iter().map(|engram| engram.id).collect::<Vec<_>>();
-            
+
             tracing::info!(
                 "Cluster {} details: engram_ids={:?}, shared_tags={:?}",
                 cluster_attempts,
@@ -501,7 +545,10 @@ let mut created = Vec::new();
             }
 
             let mut prediction_fields = tags.iter().take(4).cloned().collect::<Vec<_>>();
-            tracing::info!("Starting LLM schema field extraction for cluster {}...", cluster_attempts);
+            tracing::info!(
+                "Starting LLM schema field extraction for cluster {}...",
+                cluster_attempts
+            );
             if let Some(llm_client) = llm
                 && let Ok(extraction) = extract_schema_fields(llm_client, &cluster).await
             {
@@ -515,7 +562,7 @@ let mut created = Vec::new();
             } else {
                 tracing::info!("LLM extraction skipped or failed, using tags as prediction_fields");
             }
-            
+
             let schema = MetaEngram {
                 id: uuid::Uuid::new_v4(),
                 embedding,
@@ -537,10 +584,10 @@ let mut created = Vec::new();
             );
             postgres.save_schema(&schema).await?;
             tracing::info!("Schema {} saved to postgres", schema.id);
-            
+
             postgres.propagate_schema(&schema).await?;
             tracing::info!("Schema {} propagated to parent banks", schema.id);
-            
+
             created.push(schema.clone());
             tracing::info!(
                 "✅ Schema CREATED: id={}, source_engram_ids={:?}",
@@ -549,7 +596,7 @@ let mut created = Vec::new();
             );
         }
 
-tracing::info!(
+        tracing::info!(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 compress_schemas COMPLETE:
   total_engrams: {}

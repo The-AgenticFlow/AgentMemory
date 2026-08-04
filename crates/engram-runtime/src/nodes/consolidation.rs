@@ -142,6 +142,12 @@ impl NightlyConsolidationNode {
             cleaned_engrams
         );
 
+        // Get existing schema count before phase 4 for enriched logging
+        let schemas_before = match postgres.list_schemas().await {
+            Ok(s) => s.len(),
+            Err(_) => 0,
+        };
+
         // ── Phase 4: Schema Compression ────────────────────────────
         tracing::info!("");
         tracing::info!("PHASE 4: SCHEMA COMPRESSION");
@@ -167,7 +173,21 @@ impl NightlyConsolidationNode {
             phase3.elapsed(),
             phase4.elapsed()
         );
-        tracing::info!("  Schemas created: {}", created.len());
+
+        if created.is_empty() {
+            let total_schemas = schemas_before;
+            tracing::info!(
+                "  ℹ️  No new schemas created ({} existing schemas cover all engrams - deduplication working correctly)",
+                total_schemas
+            );
+        } else {
+            let total_schemas = schemas_before + created.len();
+            tracing::info!(
+                "  ✅ New schemas created: {} (total: {} schemas)",
+                created.len(),
+                total_schemas
+            );
+        }
         tracing::info!("========================================");
         tracing::info!("");
 
@@ -645,18 +665,22 @@ impl NightlyConsolidationNode {
             );
         }
 
+        // Calculate how many engrams were skipped due to already_covered
+        let already_covered_count = already_covered.iter().len();
         tracing::info!(
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 compress_schemas COMPLETE:
   total_engrams: {}
+  already_covered_by_schemas: {}
   total_pairs_checked: {}
   pairs_above_threshold: {} (threshold={})
   max_similarity_seen: {}
   clusters_attempted: {}
   singletons_skipped: {}
   schemas_created: {}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             engrams.len(),
+            already_covered_count,
             total_pairs_checked,
             pairs_above_threshold,
             self.schema_threshold,

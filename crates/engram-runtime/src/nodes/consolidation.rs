@@ -306,8 +306,19 @@ impl NightlyConsolidationNode {
             }
         }
 
+        // Debug: log schema counts and thresholds
+        tracing::info!(
+            "compress_schemas: {} engrams total, {} existing schemas covering {} engrams, threshold={:.2}",
+            engrams.len(),
+            existing_schemas.len(),
+            already_covered.len(),
+            self.schema_threshold
+        );
+
         let mut created = Vec::new();
         let mut visited = std::collections::HashSet::new();
+        let mut cluster_attempts = 0usize;
+        let mut singletons_skipped = 0usize;
 
         for left in &engrams {
             // Skip engrams already covered by an existing schema
@@ -326,15 +337,28 @@ impl NightlyConsolidationNode {
                 }
 
                 let similarity = cosine_similarity(&left.embedding, &right.embedding);
-                if similarity >= self.schema_threshold || shared_tag(left, right) {
+                let tags_match = shared_tag(left, right);
+                if similarity >= self.schema_threshold || tags_match {
                     cluster.push(right.clone());
                     visited.insert(right.id);
                 }
             }
 
+            cluster_attempts += 1;
             if cluster.len() < 2 {
+                singletons_skipped += 1;
+                tracing::debug!(
+                    "Skipping singleton cluster (left_id={}, similarity_scores)",
+                    left.id
+                );
                 continue;
             }
+
+            tracing::debug!(
+                "Formed cluster with {} engrams (threshold={:.2})",
+                cluster.len(),
+                self.schema_threshold
+            );
 
             let embedding = average_embedding(&cluster);
             let tags = cluster_tag_intersection(&cluster);
@@ -360,8 +384,22 @@ impl NightlyConsolidationNode {
 
             postgres.save_schema(&schema).await?;
             postgres.propagate_schema(&schema).await?;
-            created.push(schema);
+            created.push(schema.clone());
+            tracing::info!(
+                "Schema created: {} engrams → schema {}, tags={:?}",
+                cluster.len(),
+                schema.id,
+                schema.tags
+            );
         }
+
+        tracing::info!(
+            "compress_schemas summary: {} engrams, {} clusters attempted, {} singletons skipped, {} schemas created",
+            engrams.len(),
+            cluster_attempts,
+            singletons_skipped,
+            created.len()
+        );
 
         Ok(created)
     }

@@ -112,6 +112,7 @@ impl NightlyConsolidationNode {
             cleaned_engrams
         );
 
+        tracing::info!("consolidation tag refinement completed, starting compress_schemas");
         let created = self.compress_schemas(qdrant, postgres, llm).await?;
         tracing::info!(
             "consolidation run completed in {:?}: created {} schemas",
@@ -256,27 +257,33 @@ impl NightlyConsolidationNode {
         let engrams = qdrant.list_engrams().await?;
         let mut refined_count = 0usize;
 
-        for engram in &engrams {
-            if engram.episodic_content_ref.is_none() {
-                continue;
-            }
-
-            match refine_tags_with_llm(engram, llm, self.max_concepts).await {
-                Ok(refined_tags) => {
-                    if refined_tags.len() > engram.tags.len() {
-                        let mut updated = engram.clone();
-                        updated.tags = refined_tags;
-                        qdrant.upsert_engram(&updated).await?;
-                        postgres.save_engram(&updated).await?;
-                        refined_count += 1;
+        // Parallelize LLM calls with concurrency limit
+        const CONCURRENT_REFINEMENTS: usize = 5;
+        for chunk in engrams.chunks(CONCURRENT_REFINEMENTS) {
+            let futures = chunk.iter().filter_map(|engram| {
+                if engram.episodic_content_ref.is_none() {
+                    return None;
+                }
+                let engram = engram.clone();
+                let llm = llm.clone();
+                let max_concepts = self.max_concepts;
+                Some(async move {
+                    match refine_tags_with_llm(&engram, &llm, max_concepts).await {
+                        Ok(refined_tags) if refined_tags.len() > engram.tags.len() => {
+                            let mut updated = engram;
+                            updated.tags = refined_tags;
+                            Some(updated)
+                        }
+                        _ => None,
                     }
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "LLM tag refinement failed for engram {}: {error}",
-                        engram.id
-                    );
-                }
+                })
+            }).collect::<Vec<_>>();
+
+            let results = futures::future::join_all(futures).await;
+            for updated in results.into_iter().flatten() {
+                qdrant.upsert_engram(&updated).await?;
+                postgres.save_engram(&updated).await?;
+                refined_count += 1;
             }
         }
 
